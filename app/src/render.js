@@ -8,18 +8,44 @@ import { gradeFilter, drawSunsetWash, drawNeonGlow, drawGrain, drawVignette } fr
 /** The headline/subtitle boxes of the last render, for pointer hit-testing. */
 export const lastTextBoxes = { headline: null, subtitle: null };
 
-/** Cover-fit draw of an image into a rect, with zoom and pan. */
-function drawPhotoInto(ctx, img, rx, ry, rw, rh, zoom, ox, oy) {
+/**
+ * Cover-fit draw of an image into a rect, with zoom and pan — but centred on
+ * the photo's subject, not the photo's middle. `focus` is the subject's
+ * fraction inside the image (faces, the car, the tower); `anchor` is where
+ * that subject should sit inside the rect. With both at 0.5 the old centred
+ * behaviour is unchanged; a face at focus y 0.22 stays visible when a wide
+ * short panel would otherwise crop the top and bottom off. The image is
+ * clamped so it always covers the rect, then the pan offsets apply.
+ */
+function drawPhotoInto(ctx, img, rx, ry, rw, rh, zoom, ox, oy, focus, anchor) {
   const iw = img.naturalWidth || img.width;
   const ih = img.naturalHeight || img.height;
+  const fx = focus ? focus.x : 0.5;
+  const fy = focus ? focus.y : 0.42;
+  const ax = anchor ? anchor.x : 0.5;
+  const ay = anchor ? anchor.y : 0.5;
   const base = Math.max(rw / iw, rh / ih);
   const dw = iw * base * zoom;
   const dh = ih * base * zoom;
-  const mx = Math.max(0, (dw - rw) / 2);
-  const my = Math.max(0, (dh - rh) / 2);
-  const dx = rx + rw / 2 - dw / 2 + ox * mx;
-  const dy = ry + rh / 2 - dh / 2 + oy * my;
+  const loX = rx + rw - dw;
+  const hiX = rx;
+  const loY = ry + rh - dh;
+  const hiY = ry;
+  const clampX = (v) => Math.min(hiX, Math.max(loX, v));
+  const clampY = (v) => Math.min(hiY, Math.max(loY, v));
+  let dx = clampX(rx + ax * rw - fx * dw);
+  let dy = clampY(ry + ay * rh - fy * dh);
+  dx = clampX(dx + (ox * (dw - rw)) / 2);
+  dy = clampY(dy + (oy * (dh - rh)) / 2);
   ctx.drawImage(img, dx, dy, dw, dh);
+}
+
+/** The centroid of a polygon's points, in fractions of the cover. */
+function polyCentroid(poly) {
+  let x = 0;
+  let y = 0;
+  poly.forEach(([fx, fy]) => { x += fx; y += fy; });
+  return { x: x / poly.length, y: y / poly.length };
 }
 
 /** Draw one panel: clip, photo, and its frame when it has one. */
@@ -39,7 +65,20 @@ function drawPanel(ctx, w, h, panel, photo, crop, gap) {
     });
     ctx.closePath();
     ctx.clip();
-    if (photo) drawPhotoInto(ctx, photo.img, 0, 0, w, h, crop.zoom, crop.ox, crop.oy);
+    if (photo) {
+      // Fit to the triangle's own box, anchored on its centroid: the photo's
+      // subject lands in the fat part of the triangle instead of being sliced
+      // by the diagonal edge.
+      const xs = panel.poly.map(([fx]) => fx * w);
+      const ys = panel.poly.map(([, fy]) => fy * h);
+      const bx = Math.min(...xs);
+      const by = Math.min(...ys);
+      const bw = Math.max(...xs) - bx;
+      const bh = Math.max(...ys) - by;
+      const c = polyCentroid(panel.poly);
+      const anchor = { x: (c.x * w - bx) / bw, y: (c.y * h - by) / bh };
+      drawPhotoInto(ctx, photo.img, bx, by, bw, bh, crop.zoom, crop.ox, crop.oy, photo.focus, anchor);
+    }
     ctx.restore();
     return;
   }
@@ -67,14 +106,14 @@ function drawPanel(ctx, w, h, panel, photo, crop, gap) {
     ctx.beginPath();
     ctx.rect(-rw / 2, -rh / 2, rw, rh);
     ctx.clip();
-    if (photo) drawPhotoInto(ctx, photo.img, -rw / 2, -rh / 2, rw, rh, crop.zoom, crop.ox, crop.oy);
+    if (photo) drawPhotoInto(ctx, photo.img, -rw / 2, -rh / 2, rw, rh, crop.zoom, crop.ox, crop.oy, photo.focus);
     ctx.restore();
     return;
   }
   ctx.beginPath();
   ctx.rect(rx, ry, rw, rh);
   ctx.clip();
-  if (photo) drawPhotoInto(ctx, photo.img, rx, ry, rw, rh, crop.zoom, crop.ox, crop.oy);
+  if (photo) drawPhotoInto(ctx, photo.img, rx, ry, rw, rh, crop.zoom, crop.ox, crop.oy, photo.focus);
   ctx.restore();
 }
 
@@ -129,9 +168,17 @@ function drawWords(ctx, w, h, words) {
   if (!text) return null;
   const scale = h / 1080;
   const startSize = words.size * scale;
-  const size = fitFont(ctx, text.toUpperCase(), words.font, startSize, w * 0.94);
+  // The line is centred on its anchor, so its width is limited by the
+  // tighter side: a headline anchored at x 0.23 over a side panel only gets
+  // 2 * 0.23 of the width, not the whole canvas. Keep a 6% safe margin on
+  // each side too, so a line that only just fits still reads as clipped.
   const x = words.x * w;
-  const y = words.y * h;
+  const room = Math.min(x, w - x) * 2 * 0.97;
+  const size = fitFont(ctx, text.toUpperCase(), words.font, startSize, Math.min(w * 0.88, room));
+  // Clamp the line inside a vertical safe zone too: the box must clear the
+  // top and bottom edges by 3% of the cover height.
+  const half = size * 0.62;
+  const y = Math.min(Math.max(words.y * h, half + h * 0.03), h * 0.97 - half);
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

@@ -22,7 +22,7 @@ export async function runShot(shot, query, app) {
   if (subtitle !== null) state.subtitle.text = subtitle;
   const grade = query.get('grade');
   if (grade) state.fx.grade = grade;
-  const photo = query.get('photo') || 'pier.jpg';
+  const photo = query.get('photo') || 'heist-duo.jpg';
   if (shot === 'cover') document.body.classList.add('shot-cover');
   await addSample(photo);
   const extra = query.get('photos');

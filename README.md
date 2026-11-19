@@ -58,7 +58,7 @@ app/
     ui.js               controls, drag-to-pan, export
     shots.js            fixed scenes for screenshots (?shot=...)
   fonts/                Anton, Bebas Neue, Yellowtail (SIL OFL)
-  samples/              4 photos, free to use (see below)
+  samples/              6 photos, free to use (see below)
 screenshots/            4 screenshots made by running the app
 main.ts                 the entry program (copies app/ + screenshots/,
                         writes dossier.json, verifies the hand-in)
@@ -74,10 +74,17 @@ cover art and lettering are original.
 
 ## Sample photos
 
-`app/samples/boulevard.jpg` and `app/samples/pier.jpg` were made with an
-image model for make.fun and are free to use. `app/samples/neon-street.jpg`
-and `app/samples/palm-beach.jpg` are procedural canvas art drawn for this
-entry — no real people, no game artwork.
+`app/samples/heist-duo.jpg`, `getaway.jpg`, `hotel-night.jpg` and
+`beach-night.jpg` are image-model art made for this entry: one heist crew —
+two characters, their car, the hotel and the night beach — so the default
+cover tells one story instead of four unrelated pictures. `neon-street.jpg`
+and `palm-beach.jpg` are procedural canvas art drawn for this entry. No
+real people, no game artwork anywhere.
+
+Each sample carries a focus point (where its subject sits), and the renderer
+centres each panel's crop on it: faces and heroes stay in frame in every
+panel shape and export size. Headline and subtitle are kept inside a safe
+zone, so no word is ever clipped at an edge.
 
 ## Screenshots
 

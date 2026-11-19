@@ -28,7 +28,7 @@ export const LAYOUTS = [
       { x: 0.46, y: 0, w: 0.54, h: 0.5 },
       { x: 0.46, y: 0.5, w: 0.54, h: 0.5 },
     ],
-    text: { headline: { x: 0.23, y: 0.88 }, subtitle: { x: 0.23, y: 0.8 } },
+    text: { headline: { x: 0.23, y: 0.86 }, subtitle: { x: 0.23, y: 0.78 } },
   },
   {
     id: 'miami-luxury',
@@ -56,7 +56,7 @@ export const LAYOUTS = [
       { x: 0.46, y: 0.06, w: 0.52, h: 0.5, rot: 3, frame: 'polaroid' },
       { x: 0.2, y: 0.5, w: 0.6, h: 0.36, rot: -2, frame: 'polaroid' },
     ],
-    text: { headline: { x: 0.5, y: 0.905 }, subtitle: { x: 0.5, y: 0.973 } },
+    text: { headline: { x: 0.5, y: 0.88 }, subtitle: { x: 0.5, y: 0.94 } },
   },
   {
     id: 'diagonal-heist',
@@ -68,7 +68,7 @@ export const LAYOUTS = [
       { x: 0, y: 0, w: 1, h: 1, poly: [[0, 0], [1, 0], [0.32, 1], [0, 1]] },
       { x: 0, y: 0, w: 1, h: 1, poly: [[1, 0], [1, 1], [0.32, 1]] },
     ],
-    text: { headline: { x: 0.5, y: 0.86 }, subtitle: { x: 0.5, y: 0.94 } },
+    text: { headline: { x: 0.5, y: 0.84 }, subtitle: { x: 0.5, y: 0.92 } },
   },
   {
     id: 'portrait-duo',
@@ -81,7 +81,7 @@ export const LAYOUTS = [
       { x: 0.5, y: 0, w: 0.5, h: 0.82 },
     ],
     band: { x: 0, y: 0.82, w: 1, h: 0.18, color: '#12081f', rule: '#ff2e88' },
-    text: { headline: { x: 0.5, y: 0.885 }, subtitle: { x: 0.5, y: 0.96 } },
+    text: { headline: { x: 0.5, y: 0.87 }, subtitle: { x: 0.5, y: 0.93 } },
   },
   {
     id: 'sunset-strip',

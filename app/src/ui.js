@@ -145,12 +145,15 @@ function buildLayoutButtons() {
 }
 
 /** Add one loaded photo to the library and spread photos over the panels. */
-export async function addPhoto(file, img) {
+export async function addPhoto(file, img, focus) {
   const photo = {
     id: `photo-${Date.now()}-${uploadCount++}`,
     name: file.name || file,
     img,
     url: img.src,
+    // Where the subject sits in this photo (sample focus, else the middle):
+    // the renderer centres the crop on it so faces and heroes stay in frame.
+    focus: focus || { x: 0.5, y: 0.42 },
   };
   state.photos.push(photo);
   spreadPhotos();
@@ -164,7 +167,7 @@ export async function addPhoto(file, img) {
 async function addSample(file) {
   const found = SAMPLE_PHOTOS.find((s) => s.file === file);
   const img = await loadImage(`samples/${file}`);
-  await addPhoto({ name: found ? found.name : file }, img);
+  await addPhoto({ name: found ? found.name : file }, img, found ? found.focus : null);
 }
 
 /** Which panel (if any) holds a point in canvas pixels. */
@@ -384,8 +387,8 @@ async function start() {
     await runShot(shot, new URLSearchParams(location.search), { state, addSample, fitPreviewSize, requestRedraw, preview });
     return;
   }
-  await addSample('pier.jpg');
-  $('status').textContent = 'Sample photo loaded — add your own photos or export this cover.';
+  await addSample('heist-duo.jpg');
+  $('status').textContent = 'Sample photos loaded — the heist crew. Add your own photos or export this cover.';
 }
 
 start();

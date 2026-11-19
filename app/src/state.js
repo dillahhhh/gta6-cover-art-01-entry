@@ -1,11 +1,19 @@
 // The cover's whole state: photos, layout, per-panel crops, words and light.
 // One object, plain data except the loaded images, so the renderer only reads
 // this and the UI only writes it, then asks for a redraw.
+//
+// Every sample carries a `focus`: the fraction of the photo its subject sits
+// on (faces, the car, the tower). The renderer centres the visible crop on
+// that point instead of the photo's middle, so a wide or tall panel never
+// slices a face or the hero subject off. Samples are image-model art or
+// procedural scenes — no real people, no Rockstar artwork.
 export const SAMPLE_PHOTOS = [
-  { id: 'pier', name: 'Pier', file: 'pier.jpg' },
-  { id: 'boulevard', name: 'Boulevard', file: 'boulevard.jpg' },
-  { id: 'neon-street', name: 'Neon Street', file: 'neon-street.jpg' },
-  { id: 'palm-beach', name: 'Palm Beach', file: 'palm-beach.jpg' },
+  { id: 'heist-duo', name: 'Heist Duo', file: 'heist-duo.jpg', focus: { x: 0.5, y: 0.22 } },
+  { id: 'getaway', name: 'Getaway', file: 'getaway.jpg', focus: { x: 0.5, y: 0.5 } },
+  { id: 'hotel-night', name: 'Hotel Night', file: 'hotel-night.jpg', focus: { x: 0.55, y: 0.45 } },
+  { id: 'beach-night', name: 'Beach Night', file: 'beach-night.jpg', focus: { x: 0.45, y: 0.6 } },
+  { id: 'neon-street', name: 'Neon Street', file: 'neon-street.jpg', focus: { x: 0.5, y: 0.45 } },
+  { id: 'palm-beach', name: 'Palm Beach', file: 'palm-beach.jpg', focus: { x: 0.5, y: 0.45 } },
 ];
 
 export const SIZES = {
@@ -22,7 +30,7 @@ export const GRADES = {
   cinematic: 'saturate(0.9) contrast(1.15) brightness(0.96) sepia(0.22)',
 };
 
-/** A fresh cover state: one photo everywhere, sunset layout, warm grade. */
+/** A fresh cover state: the heist crew everywhere, sunset layout, warm grade. */
 export function createState() {
   return {
     photos: [],
@@ -32,7 +40,7 @@ export function createState() {
     selectedPanel: 0,
     sizeId: 'square',
     headline: {
-      text: 'VICE CITY',
+      text: 'SUNSET HEIST',
       font: 'Anton',
       size: 100,
       color: '#ffffff',
@@ -42,7 +50,7 @@ export function createState() {
       y: 0.5,
     },
     subtitle: {
-      text: 'Sunset heist · tonight',
+      text: 'VICE CITY · TONIGHT',
       font: 'Bebas Neue',
       size: 48,
       color: '#ffd166',
