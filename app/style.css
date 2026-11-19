@@ -92,6 +92,7 @@ button { font: inherit; font-weight: 700; cursor: pointer; border: 0; border-rad
 .upload:hover { filter: brightness(1.12); }
 .btn-ghost { background: transparent; border: 1px solid var(--purple); color: #d9ccff; padding: 9px; margin-top: 10px; width: 100%; }
 .btn-ghost:hover { background: rgba(139, 92, 246, 0.18); }
+.btn-ghost.active { border-color: var(--gold); color: var(--gold); box-shadow: 0 0 12px rgba(255, 209, 102, 0.3); }
 .btn-export {
   padding: 11px 20px; color: #fff; font-size: 15px;
   background: linear-gradient(90deg, var(--orange), var(--pink));

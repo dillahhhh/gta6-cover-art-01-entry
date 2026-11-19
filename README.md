@@ -22,6 +22,28 @@ photo, write the headline, grade the light, and export a PNG to share.
   6. **Portrait Duo** — two tall portraits over a caption band.
   7. **Sunset Strip** — film strips top and bottom with a hero in the middle.
   8. **Vice Grid** — asymmetric mosaic: one big panel, two smalls, a wide base.
+- **Poster art engine, one treatment for every panel.** Photos are run
+  through a Painterly / Ink Art Engine (posterized colour separation,
+  edge-aware ink outlines, halftone dots, cinematic light, print grain) so
+  the cover reads as one illustration, not photos pasted on a template.
+  Three treatments (Ink Heist, Painterly, Airbrushed Retro) with a strength
+  slider; skin-safe grading keeps faces natural (separate face-protection
+  control) while the background goes full poster.
+- **3D poster lettering.** The headline is extruded in depth with a
+  directional shadow, layered outlines, a gradient fill and a bevel
+  highlight — three styles (Extrude, Neon Stack, Slab) — not just glow.
+- **Poster formulas + Surprise Me.** Five curated picks (Ink Heist, Neon
+  Noir Collage, Sunset Pulp, Retro Airbrush, Golden Hour) set layout,
+  treatment, lettering and grade together; Surprise Me picks one of them.
+- **Auto-composition.** Uploads get their subject found offline (skin-tone
+  clusters + contrast saliency — a heuristic, not face recognition) and the
+  crop centres on it; faces ride high in their panel so heads and cars are
+  not cut. Or tap a subject on the cover to set the focus point by hand.
+  Proven: every sample photo's focus survives wide, tall, square,
+  selfie-like and group-like crops without manual adjustment.
+- **Story beats.** Each sample photo plays a chapter of the heist
+  (THE CREW, THE GETAWAY, THE MEET, THE CLEAN GETAWAY), labelled on its
+  panel, so the lower panels tell one story instead of showing locations.
 - **Per-panel crop and position.** Click a panel to select it, drag the
   photo inside it, or use the zoom and pan sliders. Each panel can hold a
   different photo, or one photo can fill them all.
@@ -51,9 +73,12 @@ app/
   index.html            the page
   style.css             dark premium interface
   src/
-    state.js            the cover's state (photos, crops, words, light)
+    state.js            the cover's state (photos, crops, words, light, art)
     layouts.js          the 8 multi-panel compositions
     render.js           the one render pipeline (preview = export)
+    painterly.js        the Painterly / Ink Art Engine (posterize, ink, halftone)
+    focus.js            auto-composition: subject detection + cover-fit maths
+    formulas.js         the 5 curated poster formulas + Surprise Me
     effects.js          sunset wash, neon glow, grain, vignette
     ui.js               controls, drag-to-pan, export
     shots.js            fixed scenes for screenshots (?shot=...)
@@ -84,11 +109,17 @@ real people, no game artwork anywhere.
 Each sample carries a focus point (where its subject sits), and the renderer
 centres each panel's crop on it: faces and heroes stay in frame in every
 panel shape and export size. Headline and subtitle are kept inside a safe
-zone, so no word is ever clipped at an edge.
+zone, so no word is ever clipped at an edge. Uploaded photos get their focus
+auto-detected offline (skin-tone clusters + contrast saliency, a heuristic —
+not face recognition; it misses on some stylized art, e.g. it picks the pink
+clouds over the tiny couple in Beach Night, and counts two people in Heist
+Duo with the midpoint biased left), or the user taps the subject to set it
+by hand. Samples always keep their curated focus.
 
 ## Screenshots
 
 Made by running the app in headless Chromium (see `shots.json` for the
-scenes): `1-cover.jpg` is an exported 1080 × 1080 cover, `2-editor.jpg`
-the editor with photos loaded, `3-cover-portrait.jpg` an exported
-1080 × 1350 cover, `4-cover-wide.jpg` an exported 1920 × 1080 cover.
+scenes): `1-cover.jpg` is an exported 1080 × 1080 cover (Sunset Pulp
+formula), `2-editor.jpg` the editor with photos loaded (Golden Hour),
+`3-cover-portrait.jpg` an exported 1080 × 1350 cover (Ink Heist),
+`4-cover-wide.jpg` an exported 1920 × 1080 cover (Neon Noir).

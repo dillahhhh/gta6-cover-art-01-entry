@@ -8,13 +8,25 @@
 // slices a face or the hero subject off. Samples are image-model art or
 // procedural scenes — no real people, no Rockstar artwork.
 export const SAMPLE_PHOTOS = [
-  { id: 'heist-duo', name: 'Heist Duo', file: 'heist-duo.jpg', focus: { x: 0.5, y: 0.22 } },
-  { id: 'getaway', name: 'Getaway', file: 'getaway.jpg', focus: { x: 0.5, y: 0.5 } },
-  { id: 'hotel-night', name: 'Hotel Night', file: 'hotel-night.jpg', focus: { x: 0.55, y: 0.45 } },
-  { id: 'beach-night', name: 'Beach Night', file: 'beach-night.jpg', focus: { x: 0.45, y: 0.6 } },
-  { id: 'neon-street', name: 'Neon Street', file: 'neon-street.jpg', focus: { x: 0.5, y: 0.45 } },
-  { id: 'palm-beach', name: 'Palm Beach', file: 'palm-beach.jpg', focus: { x: 0.5, y: 0.45 } },
+  { id: 'heist-duo', name: 'Heist Duo', file: 'heist-duo.jpg', focus: { x: 0.5, y: 0.22 }, focusKind: 'two-people' },
+  { id: 'getaway', name: 'Getaway', file: 'getaway.jpg', focus: { x: 0.5, y: 0.5 }, focusKind: 'subject' },
+  { id: 'hotel-night', name: 'Hotel Night', file: 'hotel-night.jpg', focus: { x: 0.55, y: 0.45 }, focusKind: 'subject' },
+  { id: 'beach-night', name: 'Beach Night', file: 'beach-night.jpg', focus: { x: 0.45, y: 0.6 }, focusKind: 'landscape' },
+  { id: 'neon-street', name: 'Neon Street', file: 'neon-street.jpg', focus: { x: 0.5, y: 0.45 }, focusKind: 'subject' },
+  { id: 'palm-beach', name: 'Palm Beach', file: 'palm-beach.jpg', focus: { x: 0.5, y: 0.45 }, focusKind: 'landscape' },
 ];
+
+/** Story beats: the one-line beat each sample photo plays in the heist, so
+ *  the lower panels read as chapters of one story, not three locations.
+ *  Keyed by sample id; a user's own upload has no beat and gets no label. */
+export const STORY_BEATS = {
+  'heist-duo': 'THE CREW',
+  getaway: 'THE GETAWAY',
+  'hotel-night': 'THE MEET',
+  'beach-night': 'THE CLEAN GETAWAY',
+  'neon-street': 'NEON STREETS',
+  'palm-beach': 'PALM BEACH',
+};
 
 export const SIZES = {
   square: { w: 1080, h: 1080, label: '1080 x 1080' },
@@ -65,6 +77,18 @@ export function createState() {
       neon: 0.5,
       grain: 0.35,
       vignette: 0.5,
+    },
+    // Poster art direction (the rebuild): one named treatment for every
+    // panel, one lettering style for the headline, skin kept natural while
+    // the background goes full poster, and story beats on the panels.
+    art: {
+      treatment: 'painterly',
+      strength: 0.7,
+      lettering: 'extrude',
+      skinSafe: true,
+      faceProtect: 0.6,
+      storyBeats: true,
+      formula: null,
     },
   };
 }

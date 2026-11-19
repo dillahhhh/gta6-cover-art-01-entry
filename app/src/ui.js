@@ -3,8 +3,11 @@
 // the exports share the render pipeline in render.js.
 import { createState, cropFor, photoFor, SAMPLE_PHOTOS, SIZES } from './state.js';
 import { LAYOUTS, layoutById } from './layouts.js';
-import { renderCover, exportCanvas, lastTextBoxes } from './render.js';
+import { renderCover, exportCanvas, lastTextBoxes, lastPanelDraws } from './render.js';
 import { runShot } from './shots.js';
+import { detectFocus, computeDrawRect, anchorForKind } from './focus.js';
+import { FORMULAS, applyFormula, surpriseFormula } from './formulas.js';
+import { TREATMENT_IDS } from './painterly.js';
 
 const $ = (id) => document.getElementById(id);
 const state = createState();
@@ -12,6 +15,8 @@ const preview = $('preview');
 const pctx = preview.getContext('2d');
 let uploadCount = 0;
 let redrawQueued = false;
+/** Click-to-set-focus mode: on while the user taps a subject on the cover. */
+let focusMode = false;
 
 export function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -144,17 +149,29 @@ function buildLayoutButtons() {
   document.querySelector('.layout-btn[data-layout="sunset"]').classList.add('active');
 }
 
-/** Add one loaded photo to the library and spread photos over the panels. */
-export async function addPhoto(file, img, focus) {
+/** Add one loaded photo to the library and spread photos over the panels.
+ *  A sample keeps its curated focus; an upload gets its focus auto-detected
+ *  offline (skin-cluster / saliency, see focus.js) so the first crop already
+ *  keeps the subject in frame. */
+export async function addPhoto(file, img, focus, focusKind, sampleId) {
   const photo = {
     id: `photo-${Date.now()}-${uploadCount++}`,
     name: file.name || file,
     img,
     url: img.src,
-    // Where the subject sits in this photo (sample focus, else the middle):
+    // The sample this photo came from (for its story beat), if any: a
+    // user's own upload has none and gets no beat label.
+    sampleId: sampleId || null,
+    // Where the subject sits in this photo (sample focus, else detected):
     // the renderer centres the crop on it so faces and heroes stay in frame.
     focus: focus || { x: 0.5, y: 0.42 },
+    focusKind: focusKind || 'subject',
   };
+  if (!focus) {
+    const found = detectFocus(img);
+    photo.focus = { x: found.x, y: found.y };
+    photo.focusKind = found.kind;
+  }
   state.photos.push(photo);
   spreadPhotos();
   refreshPhotoControls();
@@ -167,7 +184,7 @@ export async function addPhoto(file, img, focus) {
 async function addSample(file) {
   const found = SAMPLE_PHOTOS.find((s) => s.file === file);
   const img = await loadImage(`samples/${file}`);
-  await addPhoto({ name: found ? found.name : file }, img, found ? found.focus : null);
+  await addPhoto({ name: found ? found.name : file }, img, found ? found.focus : null, found ? found.focusKind : null, found ? found.id : null);
 }
 
 /** Which panel (if any) holds a point in canvas pixels. */
@@ -210,6 +227,27 @@ function wirePointer() {
   preview.addEventListener('pointerdown', (e) => {
     const p = toCanvas(e);
     preview.setPointerCapture(e.pointerId);
+    if (focusMode) {
+      // Click-to-set-focus: map the tap back into the photo's own fractions
+      // using the last render's draw rect for that panel.
+      const hit = panelAt(p.x, p.y);
+      if (hit >= 0) {
+        const draw = lastPanelDraws[hit];
+        const photo = photoFor(state, hit);
+        if (draw && photo && draw.dw > 0 && draw.dh > 0) {
+          photo.focus = {
+            x: Math.max(0.02, Math.min(0.98, (p.x - draw.dx) / draw.dw)),
+            y: Math.max(0.02, Math.min(0.98, (p.y - draw.dy) / draw.dh)),
+          };
+          photo.focusKind = 'manual';
+          state.selectedPanel = hit;
+          refreshPanelEditor();
+          requestRedraw();
+          $('status').textContent = `Focus set on ${photo.name} — the crop now centres there.`;
+        }
+      }
+      return;
+    }
     if (boxHit(lastTextBoxes.subtitle, p.x, p.y)) {
       drag = { kind: 'subtitle', sx: p.x, sy: p.y, ox: state.subtitle.x, oy: state.subtitle.y };
       return;
@@ -276,6 +314,68 @@ function exportSize(sizeId) {
 
 // Automation hook for screenshots and tests: export any size on demand.
 window.__exportNow = exportSize;
+
+/** Sync every control with the state (after a formula, a shot scene, or a
+ *  surprise pick changes several settings at once). */
+function syncControlsFromState() {
+  $('headlineInput').value = state.headline.text;
+  $('subtitleInput').value = state.subtitle.text;
+  $('headlineFont').value = state.headline.font;
+  $('subtitleFont').value = state.subtitle.font;
+  $('headlineSize').value = state.headline.size;
+  $('headlineSizeVal').textContent = state.headline.size;
+  $('subtitleSize').value = state.subtitle.size;
+  $('subtitleSizeVal').textContent = state.subtitle.size;
+  $('headlineColor').value = state.headline.color;
+  $('subtitleColor').value = state.subtitle.color;
+  $('headlineGlow').checked = state.headline.glow;
+  $('headlineOutline').checked = state.headline.outline;
+  $('gradeSelect').value = state.fx.grade;
+  const setSlider = (id, label, v) => {
+    $(id).value = Math.round(v * 100);
+    $(label).textContent = `${Math.round(v * 100)}%`;
+  };
+  setSlider('sunsetRange', 'sunsetVal', state.fx.sunset);
+  setSlider('neonRange', 'neonVal', state.fx.neon);
+  setSlider('grainRange', 'grainVal', state.fx.grain);
+  setSlider('vignetteRange', 'vignetteVal', state.fx.vignette);
+  $('sizeSelect').value = state.sizeId;
+  $('treatmentSelect').value = state.art.treatment;
+  $('artStrengthRange').value = Math.round(state.art.strength * 100);
+  $('artStrengthVal').textContent = `${Math.round(state.art.strength * 100)}%`;
+  $('letteringSelect').value = state.art.lettering;
+  $('skinSafeCheck').checked = state.art.skinSafe;
+  $('faceProtectRange').value = Math.round(state.art.faceProtect * 100);
+  $('faceProtectVal').textContent = `${Math.round(state.art.faceProtect * 100)}%`;
+  $('storyBeatsCheck').checked = state.art.storyBeats;
+  $('formulaSelect').value = state.art.formula || '';
+  document.querySelectorAll('.layout-btn').forEach((el) => el.classList.toggle('active', el.dataset.layout === state.layoutId));
+  refreshPanelEditor();
+}
+
+/** Build the formula picker and the treatment / lettering selects. */
+function buildArtControls() {
+  const formula = $('formulaSelect');
+  FORMULAS.forEach((f) => {
+    const opt = document.createElement('option');
+    opt.value = f.id;
+    opt.textContent = `${f.name} — ${f.direction}`;
+    formula.appendChild(opt);
+  });
+  const treatment = $('treatmentSelect');
+  const labels = {
+    ink: 'Ink Heist — posterized + hard ink outlines',
+    painterly: 'Painterly — posterized + ink + halftone',
+    airbrush: 'Airbrushed Retro — soft, smooth grade',
+    off: 'Off — raw photo (no art treatment)',
+  };
+  TREATMENT_IDS.concat(['off']).forEach((id) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = labels[id] || id;
+    treatment.appendChild(opt);
+  });
+}
 
 function wireControls() {
   $('photoInput').addEventListener('change', async (e) => {
@@ -364,12 +464,110 @@ function wireControls() {
   $('exportSquare').addEventListener('click', () => exportSize('square'));
   $('exportPortrait').addEventListener('click', () => exportSize('portrait'));
   $('exportWide').addEventListener('click', () => exportSize('wide'));
+  // --- Poster art direction (the rebuild) ---
+  $('treatmentSelect').addEventListener('change', (e) => {
+    state.art.treatment = e.target.value;
+    state.art.formula = null;
+    $('formulaSelect').value = '';
+    requestRedraw();
+  });
+  // Strength re-runs the painterly pass, so debounce slider drags.
+  let strengthTimer = null;
+  $('artStrengthRange').addEventListener('input', (e) => {
+    state.art.strength = Number(e.target.value) / 100;
+    $('artStrengthVal').textContent = `${e.target.value}%`;
+    clearTimeout(strengthTimer);
+    strengthTimer = setTimeout(() => requestRedraw(), 120);
+  });
+  $('letteringSelect').addEventListener('change', (e) => {
+    state.art.lettering = e.target.value;
+    state.art.formula = null;
+    $('formulaSelect').value = '';
+    requestRedraw();
+  });
+  $('skinSafeCheck').addEventListener('change', (e) => {
+    state.art.skinSafe = e.target.checked;
+    requestRedraw();
+  });
+  $('faceProtectRange').addEventListener('input', (e) => {
+    state.art.faceProtect = Number(e.target.value) / 100;
+    $('faceProtectVal').textContent = `${e.target.value}%`;
+    clearTimeout(strengthTimer);
+    strengthTimer = setTimeout(() => requestRedraw(), 120);
+  });
+  $('storyBeatsCheck').addEventListener('change', (e) => {
+    state.art.storyBeats = e.target.checked;
+    requestRedraw();
+  });
+  $('formulaSelect').addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    applyFormula(state, e.target.value);
+    syncControlsFromState();
+    fitPreviewSize();
+    requestRedraw();
+    $('status').textContent = `Formula “${$('formulaSelect').selectedOptions[0].textContent.split(' — ')[0]}” applied — layout, treatment, lettering and grade picked together.`;
+  });
+  $('surpriseBtn').addEventListener('click', () => {
+    const f = surpriseFormula(state);
+    syncControlsFromState();
+    fitPreviewSize();
+    requestRedraw();
+    $('status').textContent = `Surprise Me picked “${f.name}” — ${f.direction}.`;
+  });
+  $('focusModeBtn').addEventListener('click', () => {
+    focusMode = !focusMode;
+    $('focusModeBtn').textContent = focusMode ? '✓ Tap a subject to set focus…' : 'Set focus point';
+    $('focusModeBtn').classList.toggle('active', focusMode);
+    $('status').textContent = focusMode
+      ? 'Focus mode: tap the subject on the cover — the crop will centre there.'
+      : 'Focus mode off.';
+  });
+  $('autoFocusBtn').addEventListener('click', () => {
+    const photo = photoFor(state, state.selectedPanel);
+    if (!photo) return;
+    const found = detectFocus(photo.img);
+    photo.focus = { x: found.x, y: found.y };
+    photo.focusKind = found.kind;
+    requestRedraw();
+    $('status').textContent = `Auto-detected focus on ${photo.name}: ${found.kind} at (${found.x.toFixed(2)}, ${found.y.toFixed(2)}).`;
+  });
   wirePointer();
 }
+
+/** PNG data URL of an export at an exact size (for tests + determinism). */
+window.__exportDataURL = (sizeId) => exportCanvas(state, sizeId).toDataURL('image/png');
+/** The live state, for tests to read art settings and focus points. */
+window.__state = state;
+/** Offline focus detection for one loaded photo (by library index). */
+window.__detectFocusFor = (i) => {
+  const photo = state.photos[i];
+  if (!photo) return null;
+  const found = detectFocus(photo.img);
+  return { ...found, name: photo.name, curated: photo.focus, curatedKind: photo.focusKind };
+};
+/** Does the focus point survive a crop of this photo into a w×h panel?
+ *  Pure cover-fit maths — the same function the renderer uses. */
+window.__focusVisibleFor = (i, rw, rh) => {
+  const photo = state.photos[i];
+  if (!photo) return null;
+  const iw = photo.img.naturalWidth || photo.img.width;
+  const ih = photo.img.naturalHeight || photo.img.height;
+  const anchor = anchorForKind(photo.focusKind);
+  return computeDrawRect(iw, ih, rw, rh, 1, 0, 0, photo.focus, anchor);
+};
+/** Apply a formula by id, for shots and tests. */
+window.__applyFormula = (id) => {
+  const f = applyFormula(state, id);
+  if (f) syncControlsFromState();
+  return f ? f.id : null;
+};
+/** Re-sync every control with the state (shots call this after a scene). */
+window.__syncControls = syncControlsFromState;
 
 /** Start: fonts, the layout buttons, a first sample photo, then draw. */
 async function start() {
   buildLayoutButtons();
+  buildArtControls();
   wireControls();
   fitPreviewSize();
   try {
@@ -384,7 +582,7 @@ async function start() {
   }
   const shot = new URLSearchParams(location.search).get('shot');
   if (shot) {
-    await runShot(shot, new URLSearchParams(location.search), { state, addSample, fitPreviewSize, requestRedraw, preview });
+    await runShot(shot, new URLSearchParams(location.search), { state, addSample, fitPreviewSize, requestRedraw, preview, syncControls: syncControlsFromState });
     return;
   }
   await addSample('heist-duo.jpg');

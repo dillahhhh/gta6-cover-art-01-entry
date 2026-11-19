@@ -66,6 +66,11 @@
         <input id="panYRange" type="range" min="-1" max="1" step="0.01" value="0">
       </label>
       <button id="fillAll" type="button" class="btn-ghost">Use this photo in every panel</button>
+      <div class="row2">
+        <button id="focusModeBtn" type="button" class="btn-ghost">Set focus point</button>
+        <button id="autoFocusBtn" type="button" class="btn-ghost">Auto-detect focus</button>
+      </div>
+      <p class="hint">Set focus point: tap the subject on the cover and the crop centres there. Auto-detect finds it offline (skin / contrast) — no upload, no face recognition.</p>
     </section>
 
     <section class="group" id="textGroup">
@@ -135,8 +140,37 @@
       </label>
     </section>
 
+    <section class="group" id="artGroup">
+      <h2>6 &middot; Poster art</h2>
+      <p class="hint">One treatment for every panel, so the cover reads as a single illustration — not photos pasted on a template.</p>
+      <label>Poster formula
+        <select id="formulaSelect">
+          <option value="" selected>Custom — pick your own settings below</option>
+        </select>
+      </label>
+      <button id="surpriseBtn" type="button" class="btn-ghost">Surprise Me — pick a poster formula</button>
+      <label>Art treatment
+        <select id="treatmentSelect"></select>
+      </label>
+      <label>Treatment strength <span class="val" id="artStrengthVal">70%</span>
+        <input id="artStrengthRange" type="range" min="0" max="100" step="1" value="70">
+      </label>
+      <label>Headline lettering
+        <select id="letteringSelect">
+          <option value="extrude" selected>Extrude — 3D depth, slanted</option>
+          <option value="neon-stack">Neon Stack — layered lit neon</option>
+          <option value="slab">Slab — heavy block shadow</option>
+        </select>
+      </label>
+      <label class="check"><input id="skinSafeCheck" type="checkbox" checked> Skin-safe: keep faces natural while the background goes poster</label>
+      <label>Face protection <span class="val" id="faceProtectVal">60%</span>
+        <input id="faceProtectRange" type="range" min="0" max="100" step="1" value="60">
+      </label>
+      <label class="check"><input id="storyBeatsCheck" type="checkbox" checked> Story beats on panels (THE CREW, THE GETAWAY…)</label>
+    </section>
+
     <section class="group" id="exportGroup">
-      <h2>6 &middot; Export</h2>
+      <h2>7 &middot; Export</h2>
       <div class="export-buttons">
         <button id="exportSquare" type="button">PNG 1080 &times; 1080</button>
         <button id="exportPortrait" type="button">PNG 1080 &times; 1350</button>
