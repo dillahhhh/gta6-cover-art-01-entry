@@ -10,14 +10,23 @@
 //   3. a manual click fallback: the user taps the subject on the preview and
 //      that point becomes the focus.
 //
-// KNOWN LIMITS (measured on the four sample photos, 2026-11-19): the
+// KNOWN LIMITS (measured on the seven sample photos, 2026-11-19): the
 // detector counts two people in Heist Duo but its midpoint sits left of the
 // pair (the man's face, sunglasses + shadow, reads weakly, and a warm
-// window joins the count); it finds Getaway and Hotel Night within 0.25 of
-// their curated focus; it MISSES Beach Night, picking the pink clouds over
-// the tiny couple on the boardwalk. Samples therefore keep their curated
-// focus and the detector is only a first guess for uploads, with the click
-// fallback covering the misses. Do not present this as face detection.
+// window joins the count) — 0.31 from the curated focus; it finds Hotel
+// Night within 0.25 of its curated focus (0.20) but Getaway only at 0.32
+// (an earlier claim of "within 0.25" for Getaway was wrong — measured
+// 0.32, corrected here); the sky-wash guard below finds the tiny couple
+// on the Beach Night boardwalk at 0.22 from the curated focus (NEAR —
+// before the guard it picked the pink clouds at 0.32, FAR); Neon Street
+// 0.09 and Palm Beach 0.14. The five-friend row in Group Night merges
+// into one wide skin blob, split by the wide-row rule into ~6 person
+// points, and reads as a group near the row's centroid. Samples therefore
+// keep their curated focus and the detector is only a first guess for
+// uploads, with the click fallback covering the misses. This is a
+// HEURISTIC (offline skin clusters + saliency), not face detection —
+// do not present it as face detection. Group Night is AI-generated
+// image-model art, like the other photographic samples; no real people.
 // The pure maths (analyse + cover-fit) lives here with no DOM in it, so it
 // is unit-testable in Node; only detectFocus() touches a canvas.
 
@@ -124,6 +133,26 @@ export function analyzePixels(w, h, data) {
     const bh = maxY - minY + 1;
     const fill = n / (bw * bh);
     const cyFrac = sy / n / rows;
+    // Wide-row split: a row of people merges into one wide skin blob
+    // (five friends shoulder to shoulder read as one broad band). A wide,
+    // tall, wider-than-tall blob in the middle band of the frame, with gaps
+    // between its people (low fill), is a row of people, not one face:
+    // split it into ~bw/2.5 person points spread across its width. A solid
+    // warm wash high in the frame (sunset sky, sunlit window — Heist Duo's
+    // 42-cell top-right blob, fill 0.53, centre y 0.32) is NOT split: it
+    // fails both the fill and the middle-band tests and stays rejected by
+    // the width rule below.
+    if (bw >= 5 && bh >= 4 && bw > bh && fill >= 0.3 && fill < 0.5 && cyFrac >= 0.4) {
+      const k = Math.max(3, Math.round(bw / 2.5));
+      for (let i = 0; i < k; i++) {
+        blobs.push({
+          x: (minX + (i + 0.5) * (bw / k) + 0.5) / cols,
+          y: sy / n / rows,
+          cells: n / k,
+        });
+      }
+      continue;
+    }
     if (fill < 0.3 || bw > cols * 0.38 || bh > rows * 0.45 || cyFrac > 0.75) continue;
     blobs.push({ x: sx / n / cols, y: sy / n / rows, cells: n });
   }
@@ -189,6 +218,10 @@ export function analyzePixels(w, h, data) {
     let wy = 0;
     let ws = 0;
     let n = 0;
+    let minX = cols;
+    let maxX = -1;
+    let minY = rows;
+    let maxY = -1;
     const cells = [];
     const stack = [start];
     seenHot[start] = 1;
@@ -203,6 +236,10 @@ export function analyzePixels(w, h, data) {
       n += 1;
       const gx = c % cols;
       const gy = Math.floor(c / cols);
+      if (gx < minX) minX = gx;
+      if (gx > maxX) maxX = gx;
+      if (gy < minY) minY = gy;
+      if (gy > maxY) maxY = gy;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const nx = gx + dx;
         const ny = gy + dy;
@@ -214,7 +251,61 @@ export function analyzePixels(w, h, data) {
         }
       }
     }
-    if (ws > 0 && (!best || ws > best.ws)) best = { x: wx / ws, y: wy / ws, ws, n, cells };
+    if (ws > 0 && (!best || ws > best.ws)) {
+      best = { x: wx / ws, y: wy / ws, ws, n, cells, minX, maxX, minY, maxY };
+    }
+  }
+  // Sky-wash guard: if the winning cluster starts in the sky (its top is
+  // above y = 0.35) and spans more than 0.45 of the frame in either
+  // direction, it is usually a cloud bank or a bright sky, not the subject
+  // — the tiny couple on the Beach Night boardwalk loses to the pink
+  // clouds this way (0.32 from the curated focus, FAR). Re-pick the
+  // largest hot cluster that sits below y = 0.4 instead: the subject of a
+  // photo usually sits below the sky, not in it. A general rule, not
+  // hard-coded to one photo — it only fires when a cluster looks like sky.
+  if (best && best.n >= 3) {
+    const topY = (best.minY + 0.5) / rows;
+    const spanX = (best.maxX - best.minX + 1) / cols;
+    const spanY = (best.maxY - best.minY + 1) / rows;
+    if (topY < 0.35 && Math.max(spanX, spanY) > 0.45) {
+      const floorRow = Math.ceil(0.4 * rows - 0.5); // first row whose centre is at/below y = 0.4
+      const seenBelow = new Uint8Array(cols * rows);
+      let re = null;
+      for (let start = floorRow * cols; start < cols * rows; start++) {
+        if (!hot(start) || seenBelow[start]) continue;
+        let wx = 0;
+        let wy = 0;
+        let ws = 0;
+        let n = 0;
+        const cells = [];
+        const stack = [start];
+        seenBelow[start] = 1;
+        while (stack.length) {
+          const c = stack.pop();
+          const cx = (c % cols + 0.5) / cols;
+          const cy = (Math.floor(c / cols) + 0.5) / rows;
+          cells.push([cx, cy]);
+          wx += cx * sal[c];
+          wy += cy * sal[c];
+          ws += sal[c];
+          n += 1;
+          const gx = c % cols;
+          const gy = Math.floor(c / cols);
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = gx + dx;
+            const ny = gy + dy;
+            if (nx < 0 || ny < 0 || nx >= cols || ny < floorRow || ny >= rows) continue;
+            const nc = ny * cols + nx;
+            if (!seenBelow[nc] && hot(nc)) {
+              seenBelow[nc] = 1;
+              stack.push(nc);
+            }
+          }
+        }
+        if (ws > 0 && (!re || ws > re.ws)) re = { x: wx / ws, y: wy / ws, ws, n, cells };
+      }
+      if (re && re.n >= 3) best = re;
+    }
   }
   if (!best || best.n < 3) {
     // Too little salient mass to call a subject: a landscape.

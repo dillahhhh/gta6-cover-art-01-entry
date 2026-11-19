@@ -8,10 +8,11 @@
 // slices a face or the hero subject off. Samples are image-model art or
 // procedural scenes — no real people, no Rockstar artwork.
 export const SAMPLE_PHOTOS = [
-  { id: 'heist-duo', name: 'Heist Duo', file: 'heist-duo.jpg', focus: { x: 0.5, y: 0.22 }, focusKind: 'two-people' },
+  { id: 'heist-duo', name: 'Heist Duo', file: 'heist-duo.jpg', focus: { x: 0.44, y: 0.22 }, focusKind: 'two-people' },
   { id: 'getaway', name: 'Getaway', file: 'getaway.jpg', focus: { x: 0.5, y: 0.5 }, focusKind: 'subject' },
   { id: 'hotel-night', name: 'Hotel Night', file: 'hotel-night.jpg', focus: { x: 0.55, y: 0.45 }, focusKind: 'subject' },
   { id: 'beach-night', name: 'Beach Night', file: 'beach-night.jpg', focus: { x: 0.45, y: 0.6 }, focusKind: 'landscape' },
+  { id: 'group-night', name: 'Group Night', file: 'group-night.jpg', focus: { x: 0.5, y: 0.52 }, focusKind: 'group' },
   { id: 'neon-street', name: 'Neon Street', file: 'neon-street.jpg', focus: { x: 0.5, y: 0.45 }, focusKind: 'subject' },
   { id: 'palm-beach', name: 'Palm Beach', file: 'palm-beach.jpg', focus: { x: 0.5, y: 0.45 }, focusKind: 'landscape' },
 ];
@@ -23,7 +24,8 @@ export const STORY_BEATS = {
   'heist-duo': 'THE CREW',
   getaway: 'THE GETAWAY',
   'hotel-night': 'THE MEET',
-  'beach-night': 'THE CLEAN GETAWAY',
+  'group-night': 'THE SCORE',
+  'beach-night': 'THE AFTERMATH',
   'neon-street': 'NEON STREETS',
   'palm-beach': 'PALM BEACH',
 };

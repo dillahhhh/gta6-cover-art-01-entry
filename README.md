@@ -42,8 +42,9 @@ photo, write the headline, grade the light, and export a PNG to share.
   Proven: every sample photo's focus survives wide, tall, square,
   selfie-like and group-like crops without manual adjustment.
 - **Story beats.** Each sample photo plays a chapter of the heist
-  (THE CREW, THE GETAWAY, THE MEET, THE CLEAN GETAWAY), labelled on its
-  panel, so the lower panels tell one story instead of showing locations.
+  (THE CREW, THE GETAWAY, THE MEET, THE SCORE, THE AFTERMATH,
+  NEON STREETS, PALM BEACH), labelled on its panel, so the lower panels
+  tell one story instead of showing locations.
 - **Per-panel crop and position.** Click a panel to select it, drag the
   photo inside it, or use the zoom and pan sliders. Each panel can hold a
   different photo, or one photo can fill them all.
@@ -83,7 +84,7 @@ app/
     ui.js               controls, drag-to-pan, export
     shots.js            fixed scenes for screenshots (?shot=...)
   fonts/                Anton, Bebas Neue, Yellowtail (SIL OFL)
-  samples/              6 photos, free to use (see below)
+  samples/              7 photos, free to use (see below)
 screenshots/            4 screenshots made by running the app
 main.ts                 the entry program (copies app/ + screenshots/,
                         writes dossier.json, verifies the hand-in)
@@ -99,11 +100,12 @@ cover art and lettering are original.
 
 ## Sample photos
 
-`app/samples/heist-duo.jpg`, `getaway.jpg`, `hotel-night.jpg` and
-`beach-night.jpg` are image-model art made for this entry: one heist crew —
-two characters, their car, the hotel and the night beach — so the default
-cover tells one story instead of four unrelated pictures. `neon-street.jpg`
-and `palm-beach.jpg` are procedural canvas art drawn for this entry. No
+`app/samples/heist-duo.jpg`, `getaway.jpg`, `hotel-night.jpg`,
+`beach-night.jpg` and `group-night.jpg` are image-model art made for this
+entry: one heist crew — two characters, their car, the hotel, the night
+beach and five friends on Ocean Drive — so the default cover tells one
+story instead of four unrelated pictures. `neon-street.jpg` and
+`palm-beach.jpg` are procedural canvas art drawn for this entry. No
 real people, no game artwork anywhere.
 
 Each sample carries a focus point (where its subject sits), and the renderer
@@ -111,10 +113,14 @@ centres each panel's crop on it: faces and heroes stay in frame in every
 panel shape and export size. Headline and subtitle are kept inside a safe
 zone, so no word is ever clipped at an edge. Uploaded photos get their focus
 auto-detected offline (skin-tone clusters + contrast saliency, a heuristic —
-not face recognition; it misses on some stylized art, e.g. it picks the pink
-clouds over the tiny couple in Beach Night, and counts two people in Heist
-Duo with the midpoint biased left), or the user taps the subject to set it
-by hand. Samples always keep their curated focus.
+not face recognition; measured misses remain, e.g. it counts two people in
+Heist Duo with the midpoint biased left, and Getaway lands 0.32 from its
+curated focus), or the user taps the subject to set it by hand. A
+sky-wash guard re-picks below the sky when the winning saliency cluster
+looks like clouds: Beach Night's tiny couple is found at 0.22 from the
+curated focus (NEAR, not exact). A row of people that merges into one wide
+skin blob is split into ~bw/2.5 person points, so Group Night reads as a
+group near the row's centroid. Samples always keep their curated focus.
 
 ## Screenshots
 
