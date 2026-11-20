@@ -16,6 +16,9 @@ const SP_SIZES = {
 /* Fractional layout per size: hero rect, three supporting rects,
  * title band, footer. Fractions of (W, H). */
 function spLayoutFor(sizeName) {
+  // (fix round 2, item 8: the portrait band was too tall — the tagline
+  // sat ~200 px above the footer with dead air between them. The band
+  // is shorter now and the footer rides up to meet it.)
   if (sizeName === 'portrait') {
     return {
       hero: { x: 0, y: 0, w: 0.62, h: 0.54 },
@@ -24,8 +27,8 @@ function spLayoutFor(sizeName) {
         { x: 0.635, y: 0.185, w: 0.365, h: 0.16 },
         { x: 0.635, y: 0.37, w: 0.365, h: 0.16 },
       ],
-      title: { x: 0, y: 0.555, w: 1, h: 0.30 },
-      footer: { x: 0, y: 0.87, w: 1, h: 0.09 },
+      title: { x: 0, y: 0.545, w: 1, h: 0.22 },
+      footer: { x: 0, y: 0.80, w: 1, h: 0.09 },
     };
   }
   if (sizeName === 'wide') {
@@ -128,13 +131,15 @@ function spDrawTitle(ctx, text, cx, cy, maxW, maxH, style) {
   return size;
 }
 
-function spDrawPill(ctx, x, y, text, accent) {
-  const fs = Math.max(11, Math.round(y * 0 + 13));
+function spDrawPill(ctx, x, y, text, accent, posterW) {
+  // The pill font scales with the poster (fix round 2: at thumbnail
+  // scale a fixed 13px pill overflowed its panel and read "THE GETA").
+  const fs = Math.max(5, Math.round((posterW || 1080) * 0.012));
   ctx.font = Math.round(fs) + 'px "Bebas Neue", sans-serif';
   spSetSpacing(ctx, 1);
   const tw = ctx.measureText(text).width;
-  const pad = 9;
-  const h = fs + 9;
+  const pad = Math.max(3, Math.round(fs * 0.7));
+  const h = fs + 7;
   ctx.save();
   spRoundRect(ctx, x, y, tw + pad * 2, h, h / 2);
   ctx.fillStyle = accent;
@@ -155,7 +160,9 @@ function spMiniSkyline(ctx, x, y, w, h, accent) {
   if (h <= 4) return;
   const rnd = spRand(5150);
   ctx.save();
-  ctx.fillStyle = '#1c0a2c';
+  // Buildings clearly lighter than the poster's near-black footer
+  // (fix round 2, item 8: the old #1c0a2c was invisible on #12061f).
+  ctx.fillStyle = '#3a1a5e';
   let bx = x;
   while (bx < x + w) {
     const bw = w * (0.04 + rnd() * 0.06);
@@ -164,17 +171,17 @@ function spMiniSkyline(ctx, x, y, w, h, accent) {
     for (let wy = y + h - bh + 4; wy < y + h - 3; wy += 7) {
       if (rnd() > 0.5) {
         ctx.fillStyle = accent;
-        ctx.globalAlpha = 0.7;
+        ctx.globalAlpha = 0.9;
         ctx.fillRect(bx + bw * 0.25, wy, 2.5, 3);
         ctx.globalAlpha = 1;
-        ctx.fillStyle = '#1c0a2c';
+        ctx.fillStyle = '#3a1a5e';
       }
     }
     bx += bw + 2;
   }
   ctx.fillStyle = accent;
-  ctx.globalAlpha = 0.5;
-  ctx.fillRect(x, y, w, 1);
+  ctx.globalAlpha = 0.8;
+  ctx.fillRect(x, y, w, 2);
   ctx.restore();
 }
 
@@ -225,7 +232,7 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   const heroImg = imgMap.get(state.photos[state.hero.photo]);
   let heroPainted = null;
   if (heroImg) {
-    heroPainted = spPaintPhoto(heroImg, style.ramp, Math.max(2, Math.round(heroR.w)), Math.max(2, Math.round(heroR.h)), state.hero.crop, 1);
+    heroPainted = spPaintPhoto(heroImg, style.ramp, Math.max(2, Math.round(heroR.w)), Math.max(2, Math.round(heroR.h)), state.hero.crop, 0.35);
   }
 
   // Hero: procedural sunset backdrop, then the painted photo cut out
@@ -235,21 +242,11 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   }
   if (heroPainted) {
     if (state.backdrop) {
-      // Wide feathered ellipse: the photo dominates the hero and the
-      // painted backdrop only frames it at the edges. The ellipse is
-      // bigger than v1 (fix round, item 2): the hero figure reads
-      // ~15% larger and is no longer cut off at the panel's bottom.
-      const mask = spFocusMask(Math.round(heroR.w), Math.round(heroR.h),
-        state.focus, heroR.w * 0.44, heroR.h * 0.56);
-      // White lift halo: a slightly larger feathered ellipse behind the
-      // subject, soft enough to read as a rim of light, not a veil
-      // (fix round 2: the v1 halo at 0.92 alpha washed the hero out).
-      const halo = spFocusMask(Math.round(heroR.w), Math.round(heroR.h),
-        state.focus, heroR.w * 0.455, heroR.h * 0.58);
-      ctx.save();
-      ctx.globalAlpha = 0.40;
-      ctx.drawImage(halo, heroR.x, heroR.y);
-      ctx.restore();
+      // Full-bleed vertical fade (fix round 2, item 1): the photo fills
+      // the hero to every edge and fades into the sunset at the chests,
+      // so the car's dark hood — the upside-down "reflection" — never
+      // shows, and there is no oval sticker edge at all.
+      const mask = spHeroMask(Math.round(heroR.w), Math.round(heroR.h));
       const cut = spCanvas(heroR.w, heroR.h);
       const cctx = cut.getContext('2d');
       cctx.drawImage(heroPainted, 0, 0);
@@ -275,8 +272,15 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
     if (!panel) return;
     const img = imgMap.get(state.photos[panel.photo]);
     if (!img) return;
-    const ramp = style.panels[i % style.panels.length];
-    const painted = spPaintPhoto(img, ramp, Math.max(2, Math.round(p.w)), Math.max(2, Math.round(p.h)), panel.crop, 1);
+    // Wide posters grade all three panels from one warm family
+    // (fix round 2, item 9): sunset / golden / vice, not three moods.
+    const ramp = sizeName === 'wide'
+      ? ['sunset', 'golden', 'vice'][i]
+      : style.panels[i % style.panels.length];
+    // Face-zone crop (item 5): the panel's crop centres on the photo's
+    // faces (upper third by default), never on its middle.
+    const faceCrop = { ...panel.crop, y: spFaceY(state.photos[panel.photo]) };
+    const painted = spPaintPhoto(img, ramp, Math.max(2, Math.round(p.w)), Math.max(2, Math.round(p.h)), faceCrop, 0.35);
     ctx.save();
     spSlantPath(ctx, p.x, p.y, p.w, p.h);
     ctx.clip();
@@ -293,7 +297,23 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
     ctx.lineWidth = Math.max(2, W * 0.003);
     ctx.stroke();
     ctx.restore();
-    spDrawPill(ctx, p.x + 10 * scale + p.h * 0.12, p.y + 10 * scale, panel.label || labels[i] || 'PANEL', style.accent);
+    // Labels follow the PHOTO, not the panel slot (fix round 2: the wide
+    // cover's photos differ from the square's, so slot labels mismatched
+    // — a beach with no people was labelled "THE SCORE").
+    const SP_PHOTO_LABELS = {
+      'samples/selfie-day.jpg': 'THE CREW',
+      'samples/friends-day.jpg': 'THE GETAWAY',
+      'samples/group-night.jpg': 'THE SCORE',
+      'samples/beach-night.jpg': 'THE SHORE',
+      'samples/heist-duo.jpg': 'THE HEIST',
+      'samples/getaway.jpg': 'THE GETAWAY',
+      'samples/hotel-night.jpg': 'THE SCORE',
+      'samples/neon-street.jpg': 'THE CREW',
+      'samples/palm-beach.jpg': 'THE SHORE',
+    };
+    spDrawPill(ctx, p.x + 10 * scale + p.h * 0.12, p.y + 10 * scale,
+      SP_PHOTO_LABELS[state.photos[panel.photo]] || panel.label || labels[i] || 'PANEL',
+      style.accent, W);
   });
 
   // Title band: dark translucent band, then the breakout, then the wordmark.
@@ -305,38 +325,50 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   ctx.fillRect(tR.x, tR.y, tR.w, Math.max(2, 3 * scale));
   ctx.globalAlpha = 1;
 
-  // Hero breakout: the subject's shoulders re-drawn over the top of the
-  // title band, feathered, so the hero breaks the frame. The breakout
-  // samples the hero image's middle (shoulders / roofline) and spills it
-  // below the hero's bottom edge.
+  // Wordmark + tagline. The title sits lower in its band and the tagline
+  // closer under it (fix round 2, item 8): no more dead air inside the band.
+  const titleCx = tR.x + tR.w / 2;
+  const titleCy = tR.y + tR.h * 0.50;
+  const titleSize = spDrawTitle(ctx, state.title, titleCx, titleCy, tR.w, tR.h * 0.70, style);
+
+  // Hero breakout (fix round 2, item 7): the subjects' SHOULDERS and
+  // upper chests re-drawn over the top of the title letters — never the
+  // faces, never a full-width strip. The breakout's bottom lands ~26 px
+  // below the top of the capitals (its mask fades out first), so the
+  // shoulders cross the letters' tops and the letters stay readable.
+  // The strip is centred on the couple (hero width) and fades at both
+  // ends, so the outer letters stay clean.
   if (heroPainted) {
-    const boH = heroR.h * 0.34;
+    const boH = heroR.h * 0.24;
     const bo = spCanvas(heroR.w, boH);
     const bctx = bo.getContext('2d');
-    bctx.drawImage(heroPainted, 0, -heroR.h * 0.42, heroR.w, heroR.h);
-    const mask = spFocusMask(Math.round(heroR.w), Math.round(boH),
-      { x: state.focus.x, y: 0.45 }, heroR.w * 0.38, boH * 0.58);
+    bctx.drawImage(heroPainted, 0, -heroR.h * 0.25, heroR.w, heroR.h);
+    const bmask = spFocusMask(Math.round(heroR.w), Math.round(boH),
+      { x: state.focus.x, y: 0.42 }, heroR.w * 0.30, boH * 0.50);
     bctx.globalCompositeOperation = 'destination-in';
-    bctx.drawImage(mask, 0, 0);
-    ctx.drawImage(bo, heroR.x, heroR.y + heroR.h - boH * 0.55);
+    bctx.drawImage(bmask, 0, 0);
+    const tops = titleCy - titleSize * 0.35;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(tR.x, tR.y, tR.w, tR.h);
+    ctx.clip();
+    ctx.drawImage(bo, heroR.x, tops + 40 - boH);
+    ctx.restore();
   }
 
-  // Wordmark + tagline. The title sits a touch higher than v1 so the
-  // tagline below it has real air (fix round, item 3).
-  const titleCx = tR.x + tR.w / 2;
-  const titleCy = tR.y + tR.h * 0.38;
-  spDrawTitle(ctx, state.title, titleCx, titleCy, tR.w, tR.h * 0.70, style);
   if (state.tagline) {
-    // Bigger (+30%) with a hard black drop shadow, so the tagline stays
-    // legible at thumbnail size instead of drowning in the title glow.
-    ctx.font = Math.round(Math.max(16, tR.h * 0.175)) + 'px Yellowtail, cursive';
+    // Bebas Neue, not script/serif (fix round 2, item 6): the tagline
+    // must be a bundled OFL condensed face, and it must stay legible.
+    ctx.font = Math.round(Math.max(16, tR.h * 0.175)) + 'px "Bebas Neue", sans-serif';
+    spSetSpacing(ctx, Math.max(1, tR.h * 0.02));
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const tagY = tR.y + tR.h * 0.87;
+    const tagY = tR.y + tR.h * 0.86;
     ctx.fillStyle = '#0a0312';
     ctx.fillText(state.tagline, titleCx, tagY + Math.max(2, tR.h * 0.02));
     ctx.fillStyle = style.sub;
     ctx.fillText(state.tagline, titleCx, tagY);
+    spSetSpacing(ctx, 0);
   }
 
   // Footer: star row, subtitle, press mark. On portrait the footer sits

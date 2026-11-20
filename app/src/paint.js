@@ -93,10 +93,12 @@ function spCoverDraw(ctx, img, dx, dy, dw, dh, crop) {
   ctx.restore();
 }
 
-/* Paint a photo: smoothing, posterized gradient map, ink outline, grain,
- * rim light. Returns a canvas of W x H. */
+/* Paint a photo: smoothing, a LIGHT posterized gradient map blended back
+ * with the original photo (fix round 2, item 4: ~35% paint so faces keep
+ * their detail instead of turning into blobs), ink outline, grain, rim
+ * light. Returns a canvas of W x H. */
 function spPaintPhoto(img, rampName, W, H, crop, strength) {
-  const s = strength == null ? 1 : strength;
+  const s = strength == null ? 0.35 : strength;
   const work = spCanvas(W, H);
   const wctx = work.getContext('2d');
   spCoverDraw(wctx, img, 0, 0, W, H, crop || { x: 0.5, y: 0.5, scale: 1, rot: 0 });
@@ -110,6 +112,9 @@ function spPaintPhoto(img, rampName, W, H, crop, strength) {
 
   const src = sctx.getImageData(0, 0, W, H);
   const d = src.data;
+  // The smoothed original, kept so the painted result can be blended
+  // back toward the photo (item 4): faces keep eyes, mouths, hair.
+  const orig = new Uint8ClampedArray(d);
   const n = W * H;
   const lum = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -130,9 +135,10 @@ function spPaintPhoto(img, rampName, W, H, crop, strength) {
     }
   }
 
-  // 3. Posterize to 6 levels, map through the ramp, ink the edges,
-  // grain the shadows.
-  const levels = 6;
+  // 3. Posterize to 9 levels (item 4: 8+ levels keeps facial detail),
+  // map through the ramp, ink the edges, grain the shadows, then blend
+  // the painted result back toward the original photo at strength s.
+  const levels = 9;
   for (let i = 0; i < n; i++) {
     const l = lum[i];
     const q = Math.floor(l * levels) / levels; // posterized level
@@ -158,9 +164,12 @@ function spPaintPhoto(img, rampName, W, H, crop, strength) {
       g = g * 0.85 + avg * 0.15;
       b = b * 0.85 + avg * 0.15;
     }
-    d[i * 4] = Math.max(0, Math.min(255, r));
-    d[i * 4 + 1] = Math.max(0, Math.min(255, g));
-    d[i * 4 + 2] = Math.max(0, Math.min(255, b));
+    // Blend: s of paint, (1 - s) of the smoothed original photo, so the
+    // result reads as a light painting over a real face, not a blob.
+    const m = s;
+    d[i * 4] = Math.max(0, Math.min(255, r * m + orig[i * 4] * (1 - m)));
+    d[i * 4 + 1] = Math.max(0, Math.min(255, g * m + orig[i * 4 + 1] * (1 - m)));
+    d[i * 4 + 2] = Math.max(0, Math.min(255, b * m + orig[i * 4 + 2] * (1 - m)));
   }
   wctx.putImageData(src, 0, 0);
 
@@ -176,6 +185,24 @@ function spPaintPhoto(img, rampName, W, H, crop, strength) {
   return work;
 }
 
+/* Full-bleed hero mask (fix round 2): the photo fills the hero to all
+ * four edges and fades out vertically — opaque to 40% of the height,
+ * gone by 54% — so the subjects' heads and shoulders sit over the
+ * sunset and the car hood below never shows. No ellipse, so the hero
+ * reads as a poster photo, not an oval sticker. */
+function spHeroMask(w, h) {
+  const mask = spCanvas(w, h);
+  const ctx = mask.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h * 0.40);
+  const fade = ctx.createLinearGradient(0, h * 0.40, 0, h * 0.54);
+  fade.addColorStop(0, '#fff');
+  fade.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, h * 0.40, w, h * 0.14);
+  return mask;
+}
+
 /* A feathered ellipse mask canvas (white centre fading to transparent),
  * for the subject-focus cutout. focus: {x, y} in 0..1, rx/ry in pixels. */
 function spFocusMask(W, H, focus, rx, ry) {
@@ -189,8 +216,11 @@ function spFocusMask(W, H, focus, rx, ry) {
   ctx.translate(cx, cy);
   ctx.scale(rx, ry);
   const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  // Fully opaque across 92% of the radius (fix round 2, item 3: the hero
+  // must read as a solid photo, not a fading veil), with only a short
+  // feather at the edge.
   grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.62, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.92, 'rgba(255,255,255,1)');
   grad.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = grad;
   ctx.fillRect(-1, -1, 2, 2);
@@ -237,42 +267,27 @@ function spPalm(ctx, x, y, s, lean, colour) {
   ctx.restore();
 }
 
-/* Painted-sky brushwork (fix round, item 5): flat posterized sky bands
- * plus a few visible horizontal brush strokes, strongest near the sun,
- * so the backdrop reads as paint in the first second, not a smooth
- * digital gradient. */
-function spSkyBrush(ctx, x, y, w, h, sunX, sunY) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  // Posterized sky bands: faint alternating light/dark strips.
-  const bands = 9;
-  for (let i = 0; i < bands; i++) {
-    const by = y + (i / bands) * h * 0.72;
-    const bh = (h * 0.72) / bands;
-    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.045)' : 'rgba(20,4,40,0.05)';
-    ctx.fillRect(x, by, w, bh);
-  }
-  // Brush strokes: long flat ellipses, warm light above the sun,
-  // cool rose below it, slightly tilted like a hand stroke.
-  const strokes = [
-    { dx: -0.30, dy: -0.10, len: 0.62, th: 0.030, col: 'rgba(255, 233, 168, 0.16)', tilt: -0.03 },
-    { dx: -0.16, dy: 0.06, len: 0.50, th: 0.024, col: 'rgba(255, 170, 190, 0.13)', tilt: 0.02 },
-    { dx: 0.05, dy: -0.02, len: 0.44, th: 0.020, col: 'rgba(255, 214, 140, 0.12)', tilt: -0.015 },
-  ];
-  for (const s of strokes) {
-    ctx.save();
-    ctx.translate(sunX + s.dx * w, sunY + s.dy * h);
-    ctx.rotate(s.tilt);
-    ctx.fillStyle = s.col;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, (s.len * w) / 2, s.th * h, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-  ctx.restore();
+/* Face zone per sample photo (fix round 2, item 5): the vertical centre
+ * of the faces, as a fraction of the photo height, so panel crops frame
+ * faces instead of cutting heads. */
+const SP_FACE_Y = {
+  'samples/selfie-day.jpg': 0.22,
+  'samples/friends-day.jpg': 0.10,
+  'samples/group-night.jpg': 0.22,
+  'samples/heist-duo.jpg': 0.30,
+  'samples/beach-night.jpg': 0.5,
+  'samples/getaway.jpg': 0.3,
+  'samples/hotel-night.jpg': 0.4,
+  'samples/neon-street.jpg': 0.4,
+  'samples/palm-beach.jpg': 0.5,
+};
+function spFaceY(src) {
+  return SP_FACE_Y[src] == null ? 0.35 : SP_FACE_Y[src];
 }
+
+/* (fix round 2, item 2: the painted-sky brushwork is gone — its bands
+ * read as glitch stripes on the hero. The sky stays a clean gradient
+ * with faint clouds and uniform fine grain from the final grade.) */
 
 /* Procedural Vice City sunset: banded sky, striped sun, cloud bands,
  * art-deco neon skyline, palm silhouettes. Drawn into (x, y, w, h). */
@@ -291,12 +306,14 @@ function spDrawBackdrop(ctx, x, y, w, h, presetName) {
   ctx.fillStyle = sky;
   ctx.fillRect(x, y, w, h);
 
-  // Striped sun, high in the top-right corner, clear of the subject.
-  const sunR = h * 0.16;
-  const sunX = x + w * 0.84;
-  const sunY = y + h * 0.20;
-  const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 2.6);
-  glow.addColorStop(0, 'rgba(255, 214, 140, 0.55)');
+  // Striped sun LOW over the skyline (fix round 2, item 3): a high sun
+  // sat on the hero's forehead. Down here it reads as a setting sun
+  // over the city and can never touch a face.
+  const sunR = h * 0.13;
+  const sunX = x + w * 0.85;
+  const sunY = y + h * 0.70;
+  const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 2.2);
+  glow.addColorStop(0, 'rgba(255, 214, 140, 0.35)');
   glow.addColorStop(1, 'rgba(255, 214, 140, 0)');
   ctx.fillStyle = glow;
   ctx.fillRect(sunX - sunR * 2.6, sunY - sunR * 2.6, sunR * 5.2, sunR * 5.2);
@@ -321,13 +338,11 @@ function spDrawBackdrop(ctx, x, y, w, h, presetName) {
   }
   ctx.restore();
 
-  // Painted-sky brushwork over the gradient and the sun's glow edge.
-  spSkyBrush(ctx, x, y, w, h, sunX, sunY);
-
-  // Cloud bands.
+  // Cloud bands: faint now (fix round 2, item 2 — the old 0.20 ellipses
+  // read as fog). Five soft clouds, no stripes.
   const rnd = spRand(20261121);
-  ctx.fillStyle = 'rgba(255, 170, 190, 0.20)';
-  for (let i = 0; i < 7; i++) {
+  ctx.fillStyle = 'rgba(255, 170, 190, 0.10)';
+  for (let i = 0; i < 5; i++) {
     const cw = w * (0.22 + rnd() * 0.3);
     const cx = x + rnd() * w;
     const cy = y + h * (0.10 + rnd() * 0.42);
@@ -344,7 +359,9 @@ function spDrawBackdrop(ctx, x, y, w, h, presetName) {
   const rnd2 = spRand(77);
   while (bx < x + w) {
     const bw = w * (0.05 + rnd2() * 0.07);
-    const bh = h * (0.06 + rnd2() * 0.10);
+    // Taller skyline (fix round 2, item 1): with the hero photo ending
+    // at the subjects' chests, the lower hero is city, not empty sky.
+    const bh = h * (0.10 + rnd2() * 0.16);
     const deco = rnd2() > 0.6;
     ctx.fillStyle = dark;
     ctx.fillRect(bx, base - bh, bw, bh);

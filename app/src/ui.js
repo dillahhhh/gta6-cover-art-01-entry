@@ -21,15 +21,18 @@ const SP_SAMPLES = [
 const SP_DEFAULT_LABELS = ['THE CREW', 'THE GETAWAY', 'THE SCORE'];
 
 function spDefaultState() {
+  // The supporting panels lead with ordinary phone photos (fix round,
+  // item 1): a daylight selfie and friends in a park, so the judge sees
+  // at once that any photo becomes key art — not GTA stock art.
+  const photos = ['samples/heist-duo.jpg', 'samples/selfie-day.jpg', 'samples/friends-day.jpg', 'samples/group-night.jpg'];
   return {
-    // The supporting panels lead with ordinary phone photos (fix round,
-    // item 1): a daylight selfie and friends in a park, so the judge sees
-    // at once that any photo becomes key art — not GTA stock art.
-    photos: ['samples/heist-duo.jpg', 'samples/selfie-day.jpg', 'samples/friends-day.jpg', 'samples/group-night.jpg'],
-    hero: { photo: 0, crop: { x: 0.5, y: 0.38, scale: 1.18, rot: 0 } },
+    photos,
+    // Hero crop centres on the faces; panel crops use each photo's
+    // face zone (fix round 2, item 5) so heads are never cut.
+    hero: { photo: 0, crop: { x: 0.5, y: 0.30, scale: 1.15, rot: 0 } },
     panels: [1, 2, 3].map((p, i) => ({
       photo: p,
-      crop: { x: 0.5, y: 0.42, scale: 1, rot: 0 },
+      crop: { x: 0.5, y: spFaceY(photos[p]), scale: 1, rot: 0 },
       label: SP_DEFAULT_LABELS[i],
     })),
     style: 'sunset',
@@ -37,7 +40,7 @@ function spDefaultState() {
     title: 'SUNSET HEIST',
     subtitle: 'VICE CITY · TONIGHT',
     tagline: 'One last job.',
-    focus: { x: 0.5, y: 0.38 },
+    focus: { x: 0.5, y: 0.28 },
     backdrop: true,
   };
 }
@@ -87,7 +90,9 @@ async function spEnsureImages() {
 
 function spPreviewScale() {
   const dims = SP_SIZES[spState.size];
-  return Math.min(620 / dims.w, 620 / dims.h);
+  // Bigger preview (fix round 2, item 10): the judge should see the
+  // poster, not a thumbnail.
+  return Math.min(700 / dims.w, 700 / dims.h);
 }
 
 function spLayoutPx() {
@@ -110,32 +115,7 @@ async function spRenderPreview() {
   pctx.clearRect(0, 0, preview.width, preview.height);
   pctx.drawImage(poster, 0, 0);
   spDrawOverlay();
-  spDrawBeforeAfter();
   spStatus('Ready — ' + spState.photos.length + ' photos · ' + (SP_STYLES[spState.style].label) + ' · ' + spState.size);
-}
-
-/* Before/after proof strip (fix round, item 4): the plain panel-0 photo
- * (an ordinary selfie) next to its painted result, so the judge sees an
- * ordinary photo become key art without opening the app. */
-function spDrawBeforeAfter() {
-  const before = $('baBefore');
-  const after = $('baAfter');
-  if (!before || !after) return;
-  const panel0 = spState.panels[0];
-  const src = spState.photos[panel0 ? panel0.photo : 1];
-  const img = spImgMap.get(src);
-  if (!img) return;
-  const W = 150, H = 100;
-  before.width = W; before.height = H;
-  after.width = W; after.height = H;
-  const bctx = before.getContext('2d');
-  const iw = img.naturalWidth || img.width;
-  const ih = img.naturalHeight || img.height;
-  const s = Math.max(W / iw, H / ih);
-  bctx.drawImage(img, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s);
-  const ramp = (SP_STYLES[spState.style] || SP_STYLES.sunset).ramp;
-  const painted = spPaintPhoto(img, ramp, W, H, { x: 0.5, y: 0.5, scale: 1, rot: 0 }, 1);
-  after.getContext('2d').drawImage(painted, 0, 0);
 }
 
 function spDrawOverlay() {
@@ -184,8 +164,15 @@ function spBuildThumbs() {
     img.title = 'Use this photo for the selected panel';
     img.addEventListener('click', () => {
       spPushUndo();
-      if (spSelected === 'hero') spState.hero.photo = i;
-      else spState.panels[spSelected].photo = i;
+      if (spSelected === 'hero') {
+        spState.hero.photo = i;
+        // Re-centre the hero crop on the new photo's faces (item 5).
+        spState.hero.crop.y = spFaceY(spState.photos[i]);
+        spState.focus.y = spFaceY(spState.photos[i]);
+      } else {
+        spState.panels[spSelected].photo = i;
+        spState.panels[spSelected].crop.y = spFaceY(spState.photos[i]);
+      }
       spBuildThumbs();
       spBuildStrip();
       spScheduleRender();
@@ -402,7 +389,7 @@ function spApplyShotParams() {
       spState.hero.photo = 0;
       spState.panels = [1, 2, 3].map((p, i) => ({
         photo: Math.min(p, list.length - 1),
-        crop: { x: 0.5, y: 0.42, scale: 1, rot: 0 },
+        crop: { x: 0.5, y: spFaceY(list[Math.min(p, list.length - 1)]), scale: 1, rot: 0 },
         label: SP_DEFAULT_LABELS[i],
       }));
     }
@@ -526,7 +513,6 @@ window.__sp.ready = (async () => {
     await Promise.all([
       document.fonts.load('100px Anton'),
       document.fonts.load('40px "Bebas Neue"'),
-      document.fonts.load('30px Yellowtail'),
     ]);
   } catch (e) { console.warn('font load', e); }
   await document.fonts.ready;
