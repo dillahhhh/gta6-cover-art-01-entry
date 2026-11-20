@@ -1,4 +1,4 @@
-// Vice City Cover Lab — the entry program (Node 22, standard library only).
+// SUNSET PRESS — the entry program (Node 22, standard library only).
 // It hands the app in: copy app/ and screenshots/ from beside this file to
 // the output directory, write /output/dossier.json with the vendored make.fun
 // library, then prove the hand-in is sound: rebuild the dossier from the
@@ -11,6 +11,8 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, wri
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
+
+const ENTRY_NAME = 'sunset-press';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
@@ -32,6 +34,17 @@ function listFiles(dir, base = '') {
     else if (entry.isFile()) found.push(rel);
   }
   return found.sort();
+}
+
+/** A screenshot over its byte cap fails the gate, so fail here first. */
+function checkShotSizes(dir) {
+  const cap = DOSSIER_CAPS.screenshots.max_bytes;
+  for (const rel of listFiles(dir)) {
+    const bytes = statSync(join(dir, rel)).size;
+    if (bytes > cap) {
+      throw new Error(`screenshots/${rel} is ${bytes} bytes, over the ${cap} byte cap: re-export it smaller`);
+    }
+  }
 }
 
 mkdirSync(out, { recursive: true });
@@ -63,6 +76,7 @@ const shotCount = listFiles(join(out, 'screenshots')).length;
 if (shotCount < 3 || shotCount > 4) {
   throw new Error(`screenshots/ holds ${shotCount} images: the entry needs 3 or 4`);
 }
-console.log(`vice-city-cover-lab: ${manifest.length} files handed in`);
+checkShotSizes(join(out, 'screenshots'));
+console.log(`${ENTRY_NAME}: ${manifest.length} files handed in`);
 for (const line of manifest) console.log(`  ${line}`);
 console.log(`dossier.json verified: ${dossier.length} bytes, identical on rebuild`);

@@ -1,592 +1,500 @@
-// Wires the page: photos, layouts, panel editing, words, light and export.
-// Every control writes the state and asks for one redraw; the preview and
-// the exports share the render pipeline in render.js.
-import { createState, cropFor, photoFor, SAMPLE_PHOTOS, SIZES } from './state.js';
-import { LAYOUTS, layoutById } from './layouts.js';
-import { renderCover, exportCanvas, lastTextBoxes, lastPanelDraws } from './render.js';
-import { runShot } from './shots.js';
-import { detectFocus, computeDrawRect, anchorForKind } from './focus.js';
-import { FORMULAS, applyFormula, surpriseFormula } from './formulas.js';
-import { TREATMENT_IDS } from './painterly.js';
+'use strict';
+/* SUNSET PRESS — editor.
+ *
+ * One screen, three steps: photos, style, caption. The live preview is the
+ * true render (same engine as the export). Click a panel to crop it, drag
+ * to pan, wheel to zoom, drag the pink ring to move the subject focus.
+ * Everything stays on the machine: photos are read locally, never uploaded.
+ */
+
+const SP_SAMPLES = [
+  'samples/heist-duo.jpg',
+  'samples/getaway.jpg',
+  'samples/hotel-night.jpg',
+  'samples/beach-night.jpg',
+  'samples/group-night.jpg',
+  'samples/neon-street.jpg',
+  'samples/palm-beach.jpg',
+];
+const SP_DEFAULT_LABELS = ['THE CREW', 'THE GETAWAY', 'THE SCORE'];
+
+function spDefaultState() {
+  return {
+    photos: SP_SAMPLES.slice(0, 4),
+    hero: { photo: 0, crop: { x: 0.5, y: 0.42, scale: 1, rot: 0 } },
+    panels: [1, 2, 3].map((p, i) => ({
+      photo: p,
+      crop: { x: 0.5, y: 0.5, scale: 1, rot: 0 },
+      label: SP_DEFAULT_LABELS[i],
+    })),
+    style: 'sunset',
+    size: 'square',
+    title: 'SUNSET HEIST',
+    subtitle: 'VICE CITY · TONIGHT',
+    tagline: 'One last job.',
+    focus: { x: 0.5, y: 0.42 },
+    backdrop: true,
+  };
+}
+
+const spState = spDefaultState();
+const spImgMap = new Map();
+let spSelected = 'hero'; // 'hero' or 0..2
+let spUndo = [];
+let spRedo = [];
+let spRenderTimer = null;
+let spSaveTimer = null;
 
 const $ = (id) => document.getElementById(id);
-const state = createState();
 const preview = $('preview');
 const pctx = preview.getContext('2d');
-let uploadCount = 0;
-let redrawQueued = false;
-/** Click-to-set-focus mode: on while the user taps a subject on the cover. */
-let focusMode = false;
 
-export function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('could not load image'));
-    img.src = url;
-  });
+function spStatus(msg) { $('status').textContent = msg; }
+
+function spSnapshot() {
+  return JSON.stringify(spState);
+}
+function spPushUndo() {
+  spUndo.push(spSnapshot());
+  if (spUndo.length > 40) spUndo.shift();
+  spRedo = [];
+}
+function spRestore(json) {
+  const s = JSON.parse(json);
+  for (const k of Object.keys(spState)) spState[k] = s[k];
+  spSyncInputs();
+  spScheduleRender();
+}
+function spSave() {
+  clearTimeout(spSaveTimer);
+  spSaveTimer = setTimeout(() => {
+    try { localStorage.setItem('sunsetpress-v1', spSnapshot()); } catch (e) { /* private mode */ }
+  }, 400);
 }
 
-/** Ask for a redraw on the next animation frame, coalescing slider drags. */
-export function requestRedraw() {
-  if (redrawQueued) return;
-  redrawQueued = true;
-  requestAnimationFrame(() => {
-    redrawQueued = false;
-    renderCover(pctx, preview.width, preview.height, state, state.selectedPanel);
-  });
+async function spEnsureImages() {
+  const missing = spState.photos.filter((src) => !spImgMap.has(src));
+  await Promise.all(missing.map(async (src) => {
+    try { spImgMap.set(src, await spLoadImage(src)); }
+    catch (e) { console.warn('photo failed', src); }
+  }));
 }
 
-/** The preview canvas's internal size for the chosen export size. */
-function fitPreviewSize() {
-  const size = SIZES[state.sizeId];
-  const scale = Math.min(1, 1080 / Math.max(size.w, size.h));
-  preview.width = Math.round(size.w * scale);
-  preview.height = Math.round(size.h * scale);
+function spPreviewScale() {
+  const dims = SP_SIZES[spState.size];
+  return Math.min(620 / dims.w, 620 / dims.h);
 }
 
-/** Assign photos to panels in order: 1 photo fills all, several spread out. */
-function spreadPhotos() {
-  const layout = layoutById(state.layoutId);
-  layout.panels.forEach((_, i) => {
-    const crop = cropFor(state, i);
-    const photo = state.photos[i % state.photos.length];
-    crop.photoId = photo ? photo.id : null;
-  });
+function spLayoutPx() {
+  const dims = SP_SIZES[spState.size];
+  const scale = spPreviewScale();
+  const W = dims.w * scale;
+  const H = dims.h * scale;
+  const L = spLayoutFor(spState.size);
+  const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
+  return { W, H, hero: R(L.hero), supports: L.supports.map(R), title: R(L.title), footer: R(L.footer) };
 }
 
-/** Rebuild the photo strip and the per-panel photo picker. */
-function refreshPhotoControls() {
-  const thumbs = $('thumbs');
-  thumbs.innerHTML = '';
-  state.photos.forEach((photo) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'thumb';
-    b.title = photo.name;
+async function spRenderPreview() {
+  await spEnsureImages();
+  await document.fonts.ready;
+  const { W, H } = spLayoutPx();
+  const poster = spRenderPoster(spState, spState.size, spPreviewScale(), spImgMap);
+  preview.width = Math.round(W);
+  preview.height = Math.round(H);
+  pctx.clearRect(0, 0, preview.width, preview.height);
+  pctx.drawImage(poster, 0, 0);
+  spDrawOverlay();
+  spStatus('Ready — ' + spState.photos.length + ' photos · ' + (SP_STYLES[spState.style].label) + ' · ' + spState.size);
+}
+
+function spDrawOverlay() {
+  const { hero, supports } = spLayoutPx();
+  const rects = [hero, ...supports];
+  const sel = spSelected === 'hero' ? 0 : spSelected + 1;
+  const r = rects[sel];
+  if (!r) return;
+  pctx.save();
+  pctx.strokeStyle = '#ff2e88';
+  pctx.lineWidth = 2;
+  pctx.setLineDash([8, 6]);
+  pctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+  pctx.setLineDash([]);
+  // Subject-focus ring on the hero.
+  if (spSelected === 'hero') {
+    const fx = hero.x + spState.focus.x * hero.w;
+    const fy = hero.y + spState.focus.y * hero.h;
+    pctx.beginPath();
+    pctx.ellipse(fx, fy, 26, 20, 0, 0, Math.PI * 2);
+    pctx.strokeStyle = '#ff2e88';
+    pctx.lineWidth = 3;
+    pctx.stroke();
+    pctx.beginPath();
+    pctx.arc(fx, fy, 4, 0, Math.PI * 2);
+    pctx.fillStyle = '#ff2e88';
+    pctx.fill();
+  }
+  pctx.restore();
+}
+
+function spScheduleRender() {
+  clearTimeout(spRenderTimer);
+  spRenderTimer = setTimeout(() => { spRenderPreview().catch(console.error); }, 120);
+  spSave();
+}
+
+/* ---- photo thumbs ---- */
+function spBuildThumbs() {
+  const box = $('photoThumbs');
+  box.innerHTML = '';
+  spState.photos.forEach((src, i) => {
     const img = document.createElement('img');
-    img.src = photo.url;
-    img.alt = photo.name;
-    b.appendChild(img);
-    b.addEventListener('click', () => {
-      const crop = cropFor(state, state.selectedPanel);
-      crop.photoId = photo.id;
-      refreshPhotoControls();
-      requestRedraw();
+    img.src = src;
+    img.alt = 'photo ' + (i + 1);
+    img.title = 'Use this photo for the selected panel';
+    img.addEventListener('click', () => {
+      spPushUndo();
+      if (spSelected === 'hero') spState.hero.photo = i;
+      else spState.panels[spSelected].photo = i;
+      spBuildThumbs();
+      spBuildStrip();
+      spScheduleRender();
     });
-    thumbs.appendChild(b);
+    const used = spSelected === 'hero' ? spState.hero.photo === i
+      : spState.panels[spSelected] && spState.panels[spSelected].photo === i;
+    if (used) img.classList.add('used');
+    box.appendChild(img);
   });
-  const pick = $('panelPhoto');
-  pick.innerHTML = '';
-  state.photos.forEach((photo) => {
-    const opt = document.createElement('option');
-    opt.value = photo.id;
-    opt.textContent = photo.name;
-    pick.appendChild(opt);
-  });
-  const current = photoFor(state, state.selectedPanel);
-  if (current) pick.value = current.id;
 }
 
-/** Sync the panel editor (sliders, picker) with the selected panel. */
-function refreshPanelEditor() {
-  const crop = cropFor(state, state.selectedPanel);
-  $('zoomRange').value = crop.zoom;
-  $('zoomVal').textContent = `${Number(crop.zoom).toFixed(2)}×`;
-  $('panXRange').value = crop.ox;
-  $('panYRange').value = crop.oy;
-  const current = photoFor(state, state.selectedPanel);
-  if (current) $('panelPhoto').value = current.id;
-}
-
-/** Build the eight layout buttons with a mini diagram of each. */
-function buildLayoutButtons() {
-  const grid = $('layoutGrid');
-  LAYOUTS.forEach((layout) => {
+function spBuildStrip() {
+  const strip = $('panelStrip');
+  strip.innerHTML = '';
+  const names = ['HERO', 'PANEL 1', 'PANEL 2', 'PANEL 3'];
+  const descs = ['the big subject', 'supporting', 'supporting', 'supporting'];
+  names.forEach((name, i) => {
+    const key = i === 0 ? 'hero' : i - 1;
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'layout-btn';
-    b.dataset.layout = layout.id;
-    b.title = layout.blurb;
-    const mini = document.createElement('span');
-    mini.className = 'mini';
-    const hues = ['#ff2e88', '#22d3ee', '#ff7a3d', '#8b5cf6', '#ffd166', '#ff5e8a', '#3ddc97'];
-    layout.panels.forEach((panel, i) => {
-      const piece = document.createElement('i');
-      const color = hues[i % hues.length];
-      piece.style.background = color;
-      if (panel.poly) {
-        piece.style.left = '0%';
-        piece.style.top = '0%';
-        piece.style.width = '100%';
-        piece.style.height = '100%';
-        piece.style.background = `linear-gradient(115deg, ${hues[0]} 50%, ${hues[1]} 50%)`;
-      } else {
-        piece.style.left = `${panel.x * 100}%`;
-        piece.style.top = `${panel.y * 100}%`;
-        piece.style.width = `${panel.w * 100}%`;
-        piece.style.height = `${panel.h * 100}%`;
-        if (panel.rot) piece.style.transform = `rotate(${panel.rot}deg)`;
-      }
-      mini.appendChild(piece);
-    });
-    b.appendChild(mini);
-    b.appendChild(document.createTextNode(layout.name));
+    b.className = 'panel-chip' + (spSelected === key ? ' on' : '');
+    b.innerHTML = name + '<small>' + descs[i] + '</small>';
     b.addEventListener('click', () => {
-      state.layoutId = layout.id;
-      state.selectedPanel = 0;
-      const text = layout.text;
-      state.headline.x = text.headline.x;
-      state.headline.y = text.headline.y;
-      state.subtitle.x = text.subtitle.x;
-      state.subtitle.y = text.subtitle.y;
-      document.querySelectorAll('.layout-btn').forEach((el) => el.classList.toggle('active', el.dataset.layout === layout.id));
-      refreshPanelEditor();
-      requestRedraw();
+      spSelected = key;
+      spBuildThumbs();
+      spBuildStrip();
+      spRenderPreview().catch(console.error);
     });
-    grid.appendChild(b);
-  });
-  document.querySelector('.layout-btn[data-layout="sunset"]').classList.add('active');
-}
-
-/** Add one loaded photo to the library and spread photos over the panels.
- *  A sample keeps its curated focus; an upload gets its focus auto-detected
- *  offline (skin-cluster / saliency, see focus.js) so the first crop already
- *  keeps the subject in frame. */
-export async function addPhoto(file, img, focus, focusKind, sampleId) {
-  const photo = {
-    id: `photo-${Date.now()}-${uploadCount++}`,
-    name: file.name || file,
-    img,
-    url: img.src,
-    // The sample this photo came from (for its story beat), if any: a
-    // user's own upload has none and gets no beat label.
-    sampleId: sampleId || null,
-    // Where the subject sits in this photo (sample focus, else detected):
-    // the renderer centres the crop on it so faces and heroes stay in frame.
-    focus: focus || { x: 0.5, y: 0.42 },
-    focusKind: focusKind || 'subject',
-  };
-  if (!focus) {
-    const found = detectFocus(img);
-    photo.focus = { x: found.x, y: found.y };
-    photo.focusKind = found.kind;
-  }
-  state.photos.push(photo);
-  spreadPhotos();
-  refreshPhotoControls();
-  refreshPanelEditor();
-  requestRedraw();
-  return photo;
-}
-
-/** Load a sample photo by file name. */
-async function addSample(file) {
-  const found = SAMPLE_PHOTOS.find((s) => s.file === file);
-  const img = await loadImage(`samples/${file}`);
-  await addPhoto({ name: found ? found.name : file }, img, found ? found.focus : null, found ? found.focusKind : null, found ? found.id : null);
-}
-
-/** Which panel (if any) holds a point in canvas pixels. */
-function panelAt(cx, cy) {
-  const layout = layoutById(state.layoutId);
-  const w = preview.width;
-  const h = preview.height;
-  for (let i = layout.panels.length - 1; i >= 0; i--) {
-    const p = layout.panels[i];
-    if (p.poly) {
-      let inside = false;
-      const pts = p.poly.map(([fx, fy]) => [fx * w, fy * h]);
-      for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) {
-        const [ax, ay] = pts[a];
-        const [bx, by] = pts[b];
-        if ((ay > cy) !== (by > cy) && cx < ((bx - ax) * (cy - ay)) / (by - ay) + ax) inside = !inside;
-      }
-      if (inside) return i;
-    } else if (cx >= p.x * w && cx <= (p.x + p.w) * w && cy >= p.y * h && cy <= (p.y + p.h) * h) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-function boxHit(box, cx, cy) {
-  return box && cx >= box.x - 8 && cx <= box.x + box.w + 8 && cy >= box.y - 8 && cy <= box.y + box.h + 8;
-}
-
-/** Pointer drag: move words when grabbing them, else pan the panel photo. */
-function wirePointer() {
-  let drag = null;
-  const toCanvas = (e) => {
-    const r = preview.getBoundingClientRect();
-    return {
-      x: ((e.clientX - r.left) / r.width) * preview.width,
-      y: ((e.clientY - r.top) / r.height) * preview.height,
-    };
-  };
-  preview.addEventListener('pointerdown', (e) => {
-    const p = toCanvas(e);
-    preview.setPointerCapture(e.pointerId);
-    if (focusMode) {
-      // Click-to-set-focus: map the tap back into the photo's own fractions
-      // using the last render's draw rect for that panel.
-      const hit = panelAt(p.x, p.y);
-      if (hit >= 0) {
-        const draw = lastPanelDraws[hit];
-        const photo = photoFor(state, hit);
-        if (draw && photo && draw.dw > 0 && draw.dh > 0) {
-          photo.focus = {
-            x: Math.max(0.02, Math.min(0.98, (p.x - draw.dx) / draw.dw)),
-            y: Math.max(0.02, Math.min(0.98, (p.y - draw.dy) / draw.dh)),
-          };
-          photo.focusKind = 'manual';
-          state.selectedPanel = hit;
-          refreshPanelEditor();
-          requestRedraw();
-          $('status').textContent = `Focus set on ${photo.name} — the crop now centres there.`;
-        }
-      }
-      return;
-    }
-    if (boxHit(lastTextBoxes.subtitle, p.x, p.y)) {
-      drag = { kind: 'subtitle', sx: p.x, sy: p.y, ox: state.subtitle.x, oy: state.subtitle.y };
-      return;
-    }
-    if (boxHit(lastTextBoxes.headline, p.x, p.y)) {
-      drag = { kind: 'headline', sx: p.x, sy: p.y, ox: state.headline.x, oy: state.headline.y };
-      return;
-    }
-    const hit = panelAt(p.x, p.y);
-    if (hit >= 0) {
-      state.selectedPanel = hit;
-      const crop = cropFor(state, hit);
-      drag = { kind: 'panel', sx: p.x, sy: p.y, ox: crop.ox, oy: crop.oy, panel: hit };
-      refreshPanelEditor();
-      requestRedraw();
-    }
-  });
-  preview.addEventListener('pointermove', (e) => {
-    if (!drag) return;
-    const p = toCanvas(e);
-    const dx = p.x - drag.sx;
-    const dy = p.y - drag.sy;
-    if (drag.kind === 'panel') {
-      const crop = cropFor(state, drag.panel);
-      const layout = layoutById(state.layoutId);
-      const panel = layout.panels[drag.panel];
-      const pw = (panel.w || 1) * preview.width;
-      const ph = (panel.h || 1) * preview.height;
-      crop.ox = Math.max(-1, Math.min(1, drag.ox + (dx / pw) * 2));
-      crop.oy = Math.max(-1, Math.min(1, drag.oy + (dy / ph) * 2));
-      $('panXRange').value = crop.ox;
-      $('panYRange').value = crop.oy;
-    } else {
-      const words = drag.kind === 'headline' ? state.headline : state.subtitle;
-      words.x = Math.max(0.08, Math.min(0.92, drag.ox + dx / preview.width));
-      words.y = Math.max(0.04, Math.min(0.97, drag.oy + dy / preview.height));
-    }
-    requestRedraw();
-  });
-  const end = () => { drag = null; };
-  preview.addEventListener('pointerup', end);
-  preview.addEventListener('pointercancel', end);
-}
-
-/** Save the rendered canvas as a PNG download and note it for tests. */
-function downloadPng(canvas, sizeId) {
-  const size = SIZES[sizeId];
-  const name = `vice-city-cover-${size.w}x${size.h}.png`;
-  canvas.toBlob((blob) => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-    window.__lastExport = { size: sizeId, w: size.w, h: size.h, bytes: blob.size, name };
-    $('status').textContent = `Saved ${name} (${size.w} x ${size.h}, ${(blob.size / 1024).toFixed(0)} KB).`;
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  }, 'image/png');
-}
-
-function exportSize(sizeId) {
-  const canvas = exportCanvas(state, sizeId);
-  downloadPng(canvas, sizeId);
-}
-
-// Automation hook for screenshots and tests: export any size on demand.
-window.__exportNow = exportSize;
-
-/** Sync every control with the state (after a formula, a shot scene, or a
- *  surprise pick changes several settings at once). */
-function syncControlsFromState() {
-  $('headlineInput').value = state.headline.text;
-  $('subtitleInput').value = state.subtitle.text;
-  $('headlineFont').value = state.headline.font;
-  $('subtitleFont').value = state.subtitle.font;
-  $('headlineSize').value = state.headline.size;
-  $('headlineSizeVal').textContent = state.headline.size;
-  $('subtitleSize').value = state.subtitle.size;
-  $('subtitleSizeVal').textContent = state.subtitle.size;
-  $('headlineColor').value = state.headline.color;
-  $('subtitleColor').value = state.subtitle.color;
-  $('headlineGlow').checked = state.headline.glow;
-  $('headlineOutline').checked = state.headline.outline;
-  $('gradeSelect').value = state.fx.grade;
-  const setSlider = (id, label, v) => {
-    $(id).value = Math.round(v * 100);
-    $(label).textContent = `${Math.round(v * 100)}%`;
-  };
-  setSlider('sunsetRange', 'sunsetVal', state.fx.sunset);
-  setSlider('neonRange', 'neonVal', state.fx.neon);
-  setSlider('grainRange', 'grainVal', state.fx.grain);
-  setSlider('vignetteRange', 'vignetteVal', state.fx.vignette);
-  $('sizeSelect').value = state.sizeId;
-  $('treatmentSelect').value = state.art.treatment;
-  $('artStrengthRange').value = Math.round(state.art.strength * 100);
-  $('artStrengthVal').textContent = `${Math.round(state.art.strength * 100)}%`;
-  $('letteringSelect').value = state.art.lettering;
-  $('skinSafeCheck').checked = state.art.skinSafe;
-  $('faceProtectRange').value = Math.round(state.art.faceProtect * 100);
-  $('faceProtectVal').textContent = `${Math.round(state.art.faceProtect * 100)}%`;
-  $('storyBeatsCheck').checked = state.art.storyBeats;
-  $('formulaSelect').value = state.art.formula || '';
-  document.querySelectorAll('.layout-btn').forEach((el) => el.classList.toggle('active', el.dataset.layout === state.layoutId));
-  refreshPanelEditor();
-}
-
-/** Build the formula picker and the treatment / lettering selects. */
-function buildArtControls() {
-  const formula = $('formulaSelect');
-  FORMULAS.forEach((f) => {
-    const opt = document.createElement('option');
-    opt.value = f.id;
-    opt.textContent = `${f.name} — ${f.direction}`;
-    formula.appendChild(opt);
-  });
-  const treatment = $('treatmentSelect');
-  const labels = {
-    ink: 'Ink Heist — posterized + hard ink outlines',
-    painterly: 'Painterly — posterized + ink + halftone',
-    airbrush: 'Airbrushed Retro — soft, smooth grade',
-    off: 'Off — raw photo (no art treatment)',
-  };
-  TREATMENT_IDS.concat(['off']).forEach((id) => {
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = labels[id] || id;
-    treatment.appendChild(opt);
+    strip.appendChild(b);
   });
 }
 
-function wireControls() {
-  $('photoInput').addEventListener('change', async (e) => {
-    const files = [...e.target.files];
-    for (const file of files) {
-      const url = URL.createObjectURL(file);
-      const img = await loadImage(url);
-      await addPhoto(file, img);
-    }
-    $('status').textContent = files.length > 1
-      ? `${files.length} photos loaded and spread over the panels.`
-      : 'Photo loaded.';
-    e.target.value = '';
-  });
-  document.querySelectorAll('[data-sample]').forEach((b) => {
-    b.addEventListener('click', () => addSample(b.dataset.sample));
-  });
-  $('panelPhoto').addEventListener('change', (e) => {
-    cropFor(state, state.selectedPanel).photoId = e.target.value;
-    refreshPhotoControls();
-    requestRedraw();
-  });
-  $('zoomRange').addEventListener('input', (e) => {
-    const crop = cropFor(state, state.selectedPanel);
-    crop.zoom = Number(e.target.value);
-    $('zoomVal').textContent = `${crop.zoom.toFixed(2)}×`;
-    requestRedraw();
-  });
-  $('panXRange').addEventListener('input', (e) => {
-    cropFor(state, state.selectedPanel).ox = Number(e.target.value);
-    requestRedraw();
-  });
-  $('panYRange').addEventListener('input', (e) => {
-    cropFor(state, state.selectedPanel).oy = Number(e.target.value);
-    requestRedraw();
-  });
-  $('fillAll').addEventListener('click', () => {
-    const photo = photoFor(state, state.selectedPanel);
-    if (!photo) return;
-    const layout = layoutById(state.layoutId);
-    layout.panels.forEach((_, i) => { cropFor(state, i).photoId = photo.id; });
-    refreshPhotoControls();
-    requestRedraw();
-    $('status').textContent = `${photo.name} now fills every panel.`;
-  });
-  $('headlineInput').addEventListener('input', (e) => { state.headline.text = e.target.value; requestRedraw(); });
-  $('subtitleInput').addEventListener('input', (e) => { state.subtitle.text = e.target.value; requestRedraw(); });
-  $('headlineFont').addEventListener('change', (e) => { state.headline.font = e.target.value; requestRedraw(); });
-  $('subtitleFont').addEventListener('change', (e) => { state.subtitle.font = e.target.value; requestRedraw(); });
-  $('headlineSize').addEventListener('input', (e) => {
-    state.headline.size = Number(e.target.value);
-    $('headlineSizeVal').textContent = e.target.value;
-    requestRedraw();
-  });
-  $('subtitleSize').addEventListener('input', (e) => {
-    state.subtitle.size = Number(e.target.value);
-    $('subtitleSizeVal').textContent = e.target.value;
-    requestRedraw();
-  });
-  $('headlineColor').addEventListener('input', (e) => { state.headline.color = e.target.value; requestRedraw(); });
-  $('subtitleColor').addEventListener('input', (e) => { state.subtitle.color = e.target.value; requestRedraw(); });
-  $('headlineGlow').addEventListener('change', (e) => { state.headline.glow = e.target.checked; requestRedraw(); });
-  $('headlineOutline').addEventListener('change', (e) => {
-    state.headline.outline = e.target.checked;
-    state.subtitle.outline = e.target.checked;
-    requestRedraw();
-  });
-  $('gradeSelect').addEventListener('change', (e) => { state.fx.grade = e.target.value; requestRedraw(); });
-  const slider = (id, key, label) => {
-    $(id).addEventListener('input', (e) => {
-      state.fx[key] = Number(e.target.value) / 100;
-      $(label).textContent = `${e.target.value}%`;
-      requestRedraw();
+/* ---- style cards: live mini renders of the current photos ---- */
+async function spBuildStyles() {
+  const box = $('styleCards');
+  box.innerHTML = '';
+  await spEnsureImages();
+  for (const name of Object.keys(SP_STYLES)) {
+    const st = SP_STYLES[name];
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'style-card' + (spState.style === name ? ' on' : '');
+    const thumb = spRenderPoster({ ...spState, style: name }, 'square', 0.14, spImgMap);
+    thumb.style.width = '100%';
+    card.appendChild(thumb);
+    const lab = document.createElement('span');
+    lab.textContent = st.label;
+    card.appendChild(lab);
+    card.addEventListener('click', () => {
+      if (spState.style === name) return;
+      spPushUndo();
+      spState.style = name;
+      spBuildStyles();
+      spScheduleRender();
     });
-  };
-  slider('sunsetRange', 'sunset', 'sunsetVal');
-  slider('neonRange', 'neon', 'neonVal');
-  slider('grainRange', 'grain', 'grainVal');
-  slider('vignetteRange', 'vignette', 'vignetteVal');
-  $('sizeSelect').addEventListener('change', (e) => {
-    state.sizeId = e.target.value;
-    fitPreviewSize();
-    requestRedraw();
-  });
-  $('exportMain').addEventListener('click', () => exportSize(state.sizeId));
-  $('exportSquare').addEventListener('click', () => exportSize('square'));
-  $('exportPortrait').addEventListener('click', () => exportSize('portrait'));
-  $('exportWide').addEventListener('click', () => exportSize('wide'));
-  // --- Poster art direction (the rebuild) ---
-  $('treatmentSelect').addEventListener('change', (e) => {
-    state.art.treatment = e.target.value;
-    state.art.formula = null;
-    $('formulaSelect').value = '';
-    requestRedraw();
-  });
-  // Strength re-runs the painterly pass, so debounce slider drags.
-  let strengthTimer = null;
-  $('artStrengthRange').addEventListener('input', (e) => {
-    state.art.strength = Number(e.target.value) / 100;
-    $('artStrengthVal').textContent = `${e.target.value}%`;
-    clearTimeout(strengthTimer);
-    strengthTimer = setTimeout(() => requestRedraw(), 120);
-  });
-  $('letteringSelect').addEventListener('change', (e) => {
-    state.art.lettering = e.target.value;
-    state.art.formula = null;
-    $('formulaSelect').value = '';
-    requestRedraw();
-  });
-  $('skinSafeCheck').addEventListener('change', (e) => {
-    state.art.skinSafe = e.target.checked;
-    requestRedraw();
-  });
-  $('faceProtectRange').addEventListener('input', (e) => {
-    state.art.faceProtect = Number(e.target.value) / 100;
-    $('faceProtectVal').textContent = `${e.target.value}%`;
-    clearTimeout(strengthTimer);
-    strengthTimer = setTimeout(() => requestRedraw(), 120);
-  });
-  $('storyBeatsCheck').addEventListener('change', (e) => {
-    state.art.storyBeats = e.target.checked;
-    requestRedraw();
-  });
-  $('formulaSelect').addEventListener('change', (e) => {
-    if (!e.target.value) return;
-    applyFormula(state, e.target.value);
-    syncControlsFromState();
-    fitPreviewSize();
-    requestRedraw();
-    $('status').textContent = `Formula “${$('formulaSelect').selectedOptions[0].textContent.split(' — ')[0]}” applied — layout, treatment, lettering and grade picked together.`;
-  });
-  $('surpriseBtn').addEventListener('click', () => {
-    const f = surpriseFormula(state);
-    syncControlsFromState();
-    fitPreviewSize();
-    requestRedraw();
-    $('status').textContent = `Surprise Me picked “${f.name}” — ${f.direction}.`;
-  });
-  $('focusModeBtn').addEventListener('click', () => {
-    focusMode = !focusMode;
-    $('focusModeBtn').textContent = focusMode ? '✓ Tap a subject to set focus…' : 'Set focus point';
-    $('focusModeBtn').classList.toggle('active', focusMode);
-    $('status').textContent = focusMode
-      ? 'Focus mode: tap the subject on the cover — the crop will centre there.'
-      : 'Focus mode off.';
-  });
-  $('autoFocusBtn').addEventListener('click', () => {
-    const photo = photoFor(state, state.selectedPanel);
-    if (!photo) return;
-    const found = detectFocus(photo.img);
-    photo.focus = { x: found.x, y: found.y };
-    photo.focusKind = found.kind;
-    requestRedraw();
-    $('status').textContent = `Auto-detected focus on ${photo.name}: ${found.kind} at (${found.x.toFixed(2)}, ${found.y.toFixed(2)}).`;
-  });
-  wirePointer();
+    box.appendChild(card);
+  }
 }
 
-/** PNG data URL of an export at an exact size (for tests + determinism). */
-window.__exportDataURL = (sizeId) => exportCanvas(state, sizeId).toDataURL('image/png');
-/** The live state, for tests to read art settings and focus points. */
-window.__state = state;
-/** Offline focus detection for one loaded photo (by library index). */
-window.__detectFocusFor = (i) => {
-  const photo = state.photos[i];
-  if (!photo) return null;
-  const found = detectFocus(photo.img);
-  return { ...found, name: photo.name, curated: photo.focus, curatedKind: photo.focusKind };
-};
-/** Does the focus point survive a crop of this photo into a w×h panel?
- *  Pure cover-fit maths — the same function the renderer uses. */
-window.__focusVisibleFor = (i, rw, rh) => {
-  const photo = state.photos[i];
-  if (!photo) return null;
-  const iw = photo.img.naturalWidth || photo.img.width;
-  const ih = photo.img.naturalHeight || photo.img.height;
-  const anchor = anchorForKind(photo.focusKind);
-  return computeDrawRect(iw, ih, rw, rh, 1, 0, 0, photo.focus, anchor);
-};
-/** Apply a formula by id, for shots and tests. */
-window.__applyFormula = (id) => {
-  const f = applyFormula(state, id);
-  if (f) syncControlsFromState();
-  return f ? f.id : null;
-};
-/** Re-sync every control with the state (shots call this after a scene). */
-window.__syncControls = syncControlsFromState;
+function spBuildLabels() {
+  const box = $('labelInputs');
+  box.innerHTML = '';
+  spState.panels.forEach((p, i) => {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.maxLength = 14;
+    inp.value = p.label;
+    inp.placeholder = SP_DEFAULT_LABELS[i];
+    inp.addEventListener('change', () => {
+      spPushUndo();
+      spState.panels[i].label = inp.value.trim().toUpperCase() || SP_DEFAULT_LABELS[i];
+      spScheduleRender();
+    });
+    box.appendChild(inp);
+  });
+}
 
-/** Start: fonts, the layout buttons, a first sample photo, then draw. */
-async function start() {
-  buildLayoutButtons();
-  buildArtControls();
-  wireControls();
-  fitPreviewSize();
-  try {
-    await Promise.all([
-      document.fonts.load('400 100px Anton'),
-      document.fonts.load('400 100px "Bebas Neue"'),
-      document.fonts.load('400 100px Yellowtail'),
-      document.fonts.ready,
-    ]);
-  } catch {
-    // System fonts still draw the cover; the bundled fonts are a bonus.
+function spSyncInputs() {
+  $('titleInput').value = spState.title;
+  $('subtitleInput').value = spState.subtitle;
+  $('taglineInput').value = spState.tagline;
+  spBuildLabels();
+  spBuildStrip();
+  spBuildThumbs();
+  document.querySelectorAll('#sizeTabs button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.size === spState.size);
+  });
+}
+
+/* ---- export ---- */
+function spDownload(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+async function spExportPNG(sizeName) {
+  await spEnsureImages();
+  await document.fonts.ready;
+  const poster = spRenderPoster(spState, sizeName, 1, spImgMap);
+  const dims = SP_SIZES[sizeName];
+  if (poster.width !== dims.w || poster.height !== dims.h) {
+    throw new Error('export size mismatch: ' + poster.width + 'x' + poster.height + ' != ' + dims.w + 'x' + dims.h);
   }
-  const shot = new URLSearchParams(location.search).get('shot');
-  if (shot) {
-    await runShot(shot, new URLSearchParams(location.search), { state, addSample, fitPreviewSize, requestRedraw, preview, syncControls: syncControlsFromState });
+  return new Promise((resolve, reject) => {
+    poster.toBlob((blob) => {
+      if (!blob) return reject(new Error('toBlob failed'));
+      spDownload(blob, 'sunset-press-' + sizeName + '.png');
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(new Error('read failed'));
+      fr.readAsDataURL(blob);
+    }, 'image/png');
+  });
+}
+
+/* ---- pointer interaction: pan crop, zoom crop, drag focus ---- */
+function spEventPos(e) {
+  const r = preview.getBoundingClientRect();
+  const sx = preview.width / r.width;
+  const sy = preview.height / r.height;
+  return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+}
+
+let spDrag = null;
+preview.addEventListener('pointerdown', (e) => {
+  const pos = spEventPos(e);
+  const { hero, supports } = spLayoutPx();
+  preview.setPointerCapture(e.pointerId);
+  if (spSelected === 'hero') {
+    const fx = hero.x + spState.focus.x * hero.w;
+    const fy = hero.y + spState.focus.y * hero.h;
+    if (Math.hypot(pos.x - fx, pos.y - fy) < 34) {
+      spDrag = { mode: 'focus' };
+      return;
+    }
+  }
+  const rects = [hero, ...supports];
+  let hit = -1;
+  rects.forEach((r, i) => {
+    if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) hit = i;
+  });
+  if (hit >= 0) {
+    spSelected = hit === 0 ? 'hero' : hit - 1;
+    spBuildThumbs();
+    spBuildStrip();
+    spDrag = { mode: 'pan', x: pos.x, y: pos.y };
+    spRenderPreview().catch(console.error);
+  }
+});
+preview.addEventListener('pointermove', (e) => {
+  if (!spDrag) return;
+  const pos = spEventPos(e);
+  if (spDrag.mode === 'focus') {
+    const { hero } = spLayoutPx();
+    spState.focus.x = Math.max(0.08, Math.min(0.92, (pos.x - hero.x) / hero.w));
+    spState.focus.y = Math.max(0.08, Math.min(0.92, (pos.y - hero.y) / hero.h));
+    spScheduleRender();
     return;
   }
-  await addSample('heist-duo.jpg');
-  $('status').textContent = 'Sample photos loaded — the heist crew. Add your own photos or export this cover.';
+  const { hero, supports } = spLayoutPx();
+  const rects = [hero, ...supports];
+  const sel = spSelected === 'hero' ? 0 : spSelected + 1;
+  const r = rects[sel];
+  const crop = spSelected === 'hero' ? spState.hero.crop : spState.panels[spSelected].crop;
+  crop.x = Math.max(0, Math.min(1, crop.x - (pos.x - spDrag.x) / (r.w * 0.9)));
+  crop.y = Math.max(0, Math.min(1, crop.y - (pos.y - spDrag.y) / (r.h * 0.9)));
+  spDrag.x = pos.x;
+  spDrag.y = pos.y;
+  spScheduleRender();
+});
+preview.addEventListener('pointerup', () => {
+  if (spDrag && spDrag.mode !== 'focus') spPushUndo();
+  if (spDrag && spDrag.mode === 'focus') spPushUndo();
+  spDrag = null;
+});
+preview.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const crop = spSelected === 'hero' ? spState.hero.crop : spState.panels[spSelected].crop;
+  crop.scale = Math.max(1, Math.min(4, crop.scale * Math.exp(-e.deltaY * 0.0012)));
+  spScheduleRender();
+}, { passive: false });
+
+/* Drag-and-drop photos anywhere on the page. */
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const files = [...(e.dataTransfer.files || [])].filter((f) => f.type.startsWith('image/'));
+  if (files.length) spAddFiles(files);
+});
+function spAddFiles(files) {
+  spPushUndo();
+  for (const f of files) {
+    const url = URL.createObjectURL(f);
+    spState.photos.push(url);
+  }
+  spBuildThumbs();
+  spScheduleRender();
 }
 
-start();
+/* ---- shot params: ?shot=cover|editor|portrait|wide&style=&photos=&title=&subtitle=&tagline=&size= ---- */
+function spApplyShotParams() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('photos')) {
+    const list = q.get('photos').split(',').map((s) => s.trim()).filter(Boolean)
+      .map((s) => (s.includes('/') || s.startsWith('blob:') ? s : 'samples/' + s));
+    if (list.length) {
+      spState.photos = list;
+      spState.hero.photo = 0;
+      spState.panels = [1, 2, 3].map((p, i) => ({
+        photo: Math.min(p, list.length - 1),
+        crop: { x: 0.5, y: 0.5, scale: 1, rot: 0 },
+        label: SP_DEFAULT_LABELS[i],
+      }));
+    }
+  }
+  if (q.get('style') && SP_STYLES[q.get('style')]) spState.style = q.get('style');
+  if (q.get('title')) spState.title = q.get('title').toUpperCase();
+  if (q.get('subtitle')) spState.subtitle = q.get('subtitle').toUpperCase();
+  if (q.get('tagline') !== null) spState.tagline = q.get('tagline');
+  if (q.get('size') && SP_SIZES[q.get('size')]) spState.size = q.get('size');
+  const shot = q.get('shot');
+  if (shot === 'portrait') spState.size = 'portrait';
+  if (shot === 'wide') spState.size = 'wide';
+  if (shot === 'cover' || shot === 'editor') spState.size = spState.size || 'square';
+}
+
+/* ---- wire the controls ---- */
+$('fileInput').addEventListener('change', (e) => {
+  spAddFiles([...e.target.files]);
+  e.target.value = '';
+});
+$('sampleBtn').addEventListener('click', () => {
+  spPushUndo();
+  const pool = SP_SAMPLES.filter((s) => s !== spState.photos[spState.hero.photo]);
+  spState.hero.photo = spState.photos.indexOf(pool[Math.floor(Math.random() * pool.length)]);
+  if (spState.hero.photo < 0) {
+    spState.photos.push(pool[0]);
+    spState.hero.photo = spState.photos.length - 1;
+  }
+  spBuildThumbs();
+  spScheduleRender();
+});
+$('titleInput').addEventListener('input', (e) => { spState.title = e.target.value.toUpperCase(); spScheduleRender(); });
+$('titleInput').addEventListener('change', () => spPushUndo());
+$('subtitleInput').addEventListener('input', (e) => { spState.subtitle = e.target.value.toUpperCase(); spScheduleRender(); });
+$('subtitleInput').addEventListener('change', () => spPushUndo());
+$('taglineInput').addEventListener('input', (e) => { spState.tagline = e.target.value; spScheduleRender(); });
+$('taglineInput').addEventListener('change', () => spPushUndo());
+document.querySelectorAll('#sizeTabs button').forEach((b) => {
+  b.addEventListener('click', () => {
+    if (spState.size === b.dataset.size) return;
+    spPushUndo();
+    spState.size = b.dataset.size;
+    spSyncInputs();
+    spScheduleRender();
+  });
+});
+$('exportBtn').addEventListener('click', async () => {
+  $('exportNote').textContent = 'Rendering ' + spState.size + '…';
+  try {
+    await spExportPNG(spState.size);
+    $('exportNote').textContent = 'Exported sunset-press-' + spState.size + '.png — exact size, nothing uploaded.';
+  } catch (err) {
+    $('exportNote').textContent = 'Export failed: ' + err.message;
+  }
+});
+$('exportAllBtn').addEventListener('click', async () => {
+  $('exportNote').textContent = 'Rendering all 3 sizes…';
+  try {
+    for (const s of ['square', 'portrait', 'wide']) {
+      await spExportPNG(s);
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    $('exportNote').textContent = 'Exported all 3 sizes — exact PNGs, nothing uploaded.';
+  } catch (err) {
+    $('exportNote').textContent = 'Export failed: ' + err.message;
+  }
+});
+$('shuffleBtn').addEventListener('click', () => {
+  spPushUndo();
+  const names = Object.keys(SP_STYLES).filter((n) => n !== spState.style);
+  spState.style = names[Math.floor(Math.random() * names.length)];
+  spBuildStyles();
+  spScheduleRender();
+});
+$('undoBtn').addEventListener('click', () => {
+  if (!spUndo.length) return;
+  spRedo.push(spSnapshot());
+  spRestore(spUndo.pop());
+});
+$('redoBtn').addEventListener('click', () => {
+  if (!spRedo.length) return;
+  spUndo.push(spSnapshot());
+  spRestore(spRedo.pop());
+});
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); $('undoBtn').click(); }
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); $('redoBtn').click(); }
+  if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') { $('shuffleBtn').click(); }
+});
+
+/* ---- boot ---- */
+window.__sp = {
+  state: spState,
+  imgMap: spImgMap,
+  render: () => spRenderPreview(),
+  exportPNG: (size) => spExportPNG(size),
+  setStyle: (name) => { spState.style = name; spBuildStyles(); spScheduleRender(); },
+  setSize: (name) => { spState.size = name; spSyncInputs(); spScheduleRender(); },
+  ready: null,
+};
+
+window.__sp.ready = (async () => {
+  spStatus('Loading fonts…');
+  try {
+    await Promise.all([
+      document.fonts.load('100px Anton'),
+      document.fonts.load('40px "Bebas Neue"'),
+      document.fonts.load('30px Yellowtail'),
+    ]);
+  } catch (e) { console.warn('font load', e); }
+  await document.fonts.ready;
+  spApplyShotParams();
+  try {
+    const saved = localStorage.getItem('sunsetpress-v1');
+    if (saved && !location.search) {
+      const s = JSON.parse(saved);
+      for (const k of Object.keys(spState)) if (s[k] !== undefined) spState[k] = s[k];
+    }
+  } catch (e) { /* corrupted save: ignore */ }
+  spSyncInputs();
+  await spEnsureImages();
+  await spRenderPreview();
+  await spBuildStyles();
+  spStatus('Ready — drag a photo, pick a style, export.');
+})();

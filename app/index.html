@@ -1,194 +1,82 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vice City Cover Lab — GTA-style cover maker</title>
-<link rel="stylesheet" href="./style.css">
+<title>SUNSET PRESS — GTA 6-style cover art maker</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">
-    <span class="brand-mark">VC</span>
-    <div>
-      <h1>VICE CITY COVER LAB</h1>
-      <p>Turn your photos into a Vice City poster. No upload, no account, all local.</p>
-    </div>
-  </div>
-  <div class="top-actions">
-    <label class="size-label" for="sizeSelect">Cover size</label>
-    <select id="sizeSelect">
-      <option value="square" selected>1080 &times; 1080 square</option>
-      <option value="portrait">1080 &times; 1350 portrait</option>
-      <option value="wide">1920 &times; 1080 wide</option>
-    </select>
-    <button id="exportMain" type="button" class="btn-export">Export PNG</button>
-  </div>
+  <div class="wordmark">SUNSET<span> PRESS</span></div>
+  <div class="tagline">One photo in. A full key-art poster out.</div>
+  <div class="top-status" id="status">Loading…</div>
 </header>
 
 <main class="layout">
-  <aside class="panel" aria-label="Editor controls">
-    <section class="group" id="photosGroup">
-      <h2>1 &middot; Photos</h2>
-      <label class="upload" for="photoInput">+ Add photos from your computer</label>
-      <input id="photoInput" type="file" accept="image/*" multiple>
-      <p class="hint">One photo fills every panel, or several photos fill the panels one by one. Photos never leave your machine.</p>
-      <div class="thumbs" id="thumbs"></div>
-      <div class="samples">
-        <span>Try a sample:</span>
-        <button type="button" data-sample="heist-duo.jpg">Heist Duo</button>
-        <button type="button" data-sample="getaway.jpg">Getaway</button>
-        <button type="button" data-sample="hotel-night.jpg">Hotel Night</button>
-        <button type="button" data-sample="beach-night.jpg">Beach Night</button>
-        <button type="button" data-sample="group-night.jpg">Group Night</button>
-        <button type="button" data-sample="neon-street.jpg">Neon Street</button>
-        <button type="button" data-sample="palm-beach.jpg">Palm Beach</button>
+  <aside class="panel">
+    <section>
+      <h2>1 · Photos</h2>
+      <p class="hint">Drop photos anywhere, or pick a file. One photo fills every panel; several fill them in order.</p>
+      <div class="row">
+        <label class="btn" for="fileInput">Add photos…</label>
+        <input type="file" id="fileInput" accept="image/*" multiple hidden>
+        <button class="btn ghost" id="sampleBtn" type="button">Try a sample</button>
       </div>
+      <div class="thumbs" id="photoThumbs"></div>
     </section>
 
-    <section class="group" id="layoutsGroup">
-      <h2>2 &middot; Layout</h2>
-      <div class="layouts" id="layoutGrid"></div>
+    <section>
+      <h2>2 · Poster style</h2>
+      <p class="hint">Each style sets the layout grade, lettering and backdrop together.</p>
+      <div class="styles" id="styleCards"></div>
     </section>
 
-    <section class="group" id="panelGroup">
-      <h2>3 &middot; Selected panel</h2>
-      <p class="hint">Click a panel on the cover to select it, then drag it to reposition the photo inside.</p>
-      <label>Photo in this panel
-        <select id="panelPhoto"></select>
+    <section>
+      <h2>3 · Caption</h2>
+      <label class="field">Title
+        <input id="titleInput" type="text" maxlength="24" value="SUNSET HEIST" autocomplete="off">
       </label>
-      <label>Zoom <span class="val" id="zoomVal">1.00&times;</span>
-        <input id="zoomRange" type="range" min="1" max="3" step="0.01" value="1">
+      <label class="field">Subtitle
+        <input id="subtitleInput" type="text" maxlength="40" value="VICE CITY · TONIGHT" autocomplete="off">
       </label>
-      <label>Pan left / right
-        <input id="panXRange" type="range" min="-1" max="1" step="0.01" value="0">
+      <label class="field">Tagline
+        <input id="taglineInput" type="text" maxlength="48" value="One last job." autocomplete="off">
       </label>
-      <label>Pan up / down
-        <input id="panYRange" type="range" min="-1" max="1" step="0.01" value="0">
-      </label>
-      <button id="fillAll" type="button" class="btn-ghost">Use this photo in every panel</button>
-      <div class="row2">
-        <button id="focusModeBtn" type="button" class="btn-ghost">Set focus point</button>
-        <button id="autoFocusBtn" type="button" class="btn-ghost">Auto-detect focus</button>
-      </div>
-      <p class="hint">Set focus point: tap the subject on the cover and the crop centres there. Auto-detect finds it offline (skin / contrast) — no upload, no face recognition.</p>
+      <div class="labels" id="labelInputs"></div>
     </section>
 
-    <section class="group" id="textGroup">
-      <h2>4 &middot; Words</h2>
-      <label>Headline
-        <input id="headlineInput" type="text" maxlength="28" value="SUNSET HEIST">
-      </label>
-      <label>Subtitle
-        <input id="subtitleInput" type="text" maxlength="48" value="VICE CITY &middot; TONIGHT">
-      </label>
-      <div class="row2">
-        <label>Headline font
-          <select id="headlineFont">
-            <option value="Anton" selected>Anton — tall &amp; bold</option>
-            <option value="Bebas Neue">Bebas Neue — clean caps</option>
-            <option value="Yellowtail">Yellowtail — neon script</option>
-            <option value="Arial Black">Arial Black — system</option>
-          </select>
-        </label>
-        <label>Subtitle font
-          <select id="subtitleFont">
-            <option value="Bebas Neue" selected>Bebas Neue — clean caps</option>
-            <option value="Anton">Anton — tall &amp; bold</option>
-            <option value="Yellowtail">Yellowtail — neon script</option>
-            <option value="Arial Black">Arial Black — system</option>
-          </select>
-        </label>
+    <section>
+      <h2>4 · Size &amp; export</h2>
+      <div class="sizes" id="sizeTabs">
+        <button type="button" data-size="square" class="on">1:1 · 1080×1080</button>
+        <button type="button" data-size="portrait">4:5 · 1080×1350</button>
+        <button type="button" data-size="wide">16:9 · 1920×1080</button>
       </div>
-      <div class="row2">
-        <label>Headline size <span class="val" id="headlineSizeVal">100</span>
-          <input id="headlineSize" type="range" min="40" max="170" step="1" value="100">
-        </label>
-        <label>Subtitle size <span class="val" id="subtitleSizeVal">48</span>
-          <input id="subtitleSize" type="range" min="20" max="90" step="1" value="48">
-        </label>
+      <div class="row">
+        <button class="btn primary" id="exportBtn" type="button">Export this size</button>
+        <button class="btn" id="exportAllBtn" type="button">Export all 3</button>
       </div>
-      <div class="row2">
-        <label>Headline colour <input id="headlineColor" type="color" value="#ffffff"></label>
-        <label>Subtitle colour <input id="subtitleColor" type="color" value="#ffd166"></label>
+      <div class="row">
+        <button class="btn ghost" id="shuffleBtn" type="button">Shuffle style</button>
+        <button class="btn ghost" id="undoBtn" type="button">Undo</button>
+        <button class="btn ghost" id="redoBtn" type="button">Redo</button>
       </div>
-      <label class="check"><input id="headlineGlow" type="checkbox" checked> Neon glow on the headline</label>
-      <label class="check"><input id="headlineOutline" type="checkbox" checked> Dark outline on the words</label>
-    </section>
-
-    <section class="group" id="fxGroup">
-      <h2>5 &middot; Light &amp; film</h2>
-      <label>Colour grade
-        <select id="gradeSelect">
-          <option value="sunset" selected>Sunset — warm pink &amp; gold</option>
-          <option value="neon">Neon — hot pink &amp; cyan</option>
-          <option value="noir">Noir — black &amp; white</option>
-          <option value="miami">Miami — bright &amp; clean</option>
-          <option value="cinematic">Cinematic — muted teal &amp; gold</option>
-        </select>
-      </label>
-      <label>Sunset wash <span class="val" id="sunsetVal">60%</span>
-        <input id="sunsetRange" type="range" min="0" max="100" step="1" value="60">
-      </label>
-      <label>Neon glow <span class="val" id="neonVal">50%</span>
-        <input id="neonRange" type="range" min="0" max="100" step="1" value="50">
-      </label>
-      <label>Film grain <span class="val" id="grainVal">35%</span>
-        <input id="grainRange" type="range" min="0" max="100" step="1" value="35">
-      </label>
-      <label>Vignette <span class="val" id="vignetteVal">50%</span>
-        <input id="vignetteRange" type="range" min="0" max="100" step="1" value="50">
-      </label>
-    </section>
-
-    <section class="group" id="artGroup">
-      <h2>6 &middot; Poster art</h2>
-      <p class="hint">One treatment for every panel, so the cover reads as a single illustration — not photos pasted on a template.</p>
-      <label>Poster formula
-        <select id="formulaSelect">
-          <option value="" selected>Custom — pick your own settings below</option>
-        </select>
-      </label>
-      <button id="surpriseBtn" type="button" class="btn-ghost">Surprise Me — pick a poster formula</button>
-      <label>Art treatment
-        <select id="treatmentSelect"></select>
-      </label>
-      <label>Treatment strength <span class="val" id="artStrengthVal">70%</span>
-        <input id="artStrengthRange" type="range" min="0" max="100" step="1" value="70">
-      </label>
-      <label>Headline lettering
-        <select id="letteringSelect">
-          <option value="extrude" selected>Extrude — 3D depth, slanted</option>
-          <option value="neon-stack">Neon Stack — layered lit neon</option>
-          <option value="slab">Slab — heavy block shadow</option>
-        </select>
-      </label>
-      <label class="check"><input id="skinSafeCheck" type="checkbox" checked> Skin-safe: keep faces natural while the background goes poster</label>
-      <label>Face protection <span class="val" id="faceProtectVal">60%</span>
-        <input id="faceProtectRange" type="range" min="0" max="100" step="1" value="60">
-      </label>
-      <label class="check"><input id="storyBeatsCheck" type="checkbox" checked> Story beats on panels (THE CREW, THE GETAWAY…)</label>
-    </section>
-
-    <section class="group" id="exportGroup">
-      <h2>7 &middot; Export</h2>
-      <div class="export-buttons">
-        <button id="exportSquare" type="button">PNG 1080 &times; 1080</button>
-        <button id="exportPortrait" type="button">PNG 1080 &times; 1350</button>
-        <button id="exportWide" type="button">PNG 1920 &times; 1080</button>
-      </div>
-      <p id="status" role="status">Pick a photo to begin.</p>
+      <p class="hint" id="exportNote">Exports are exact-size PNGs, saved to your machine. Nothing is uploaded.</p>
     </section>
   </aside>
 
-  <section class="stage" aria-label="Live preview">
-    <div class="canvas-wrap">
-      <canvas id="preview" width="1080" height="1080" aria-label="Live cover preview"></canvas>
-      <p class="stage-hint">Live preview — what you see is exactly what the PNG gets. Click a panel to edit it.</p>
+  <section class="stage">
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="preview"></canvas>
+      <div class="stage-hint" id="stageHint">Click a panel to crop it · drag to pan · wheel to zoom · drag the pink ring to move the subject focus</div>
     </div>
+    <div class="panel-strip" id="panelStrip"></div>
   </section>
 </main>
 
-<script type="module" src="./src/ui.js"></script>
+<script src="src/paint.js"></script>
+<script src="src/render.js"></script>
+<script src="src/ui.js"></script>
 </body>
 </html>
