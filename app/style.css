@@ -104,6 +104,24 @@ body {
 .panel-chip.on { border-color: #ff2e88; background: #2a0a35; }
 .panel-chip small { display: block; color: #b9a3cc; font-size: 11px; }
 
+/* One-click cover button (fix round, item 6): the single obvious entry
+ * point, loud enough to read as "one click and done". */
+.make-cover {
+  display: block; width: 100%; margin-bottom: 14px; padding: 14px 18px;
+  font-family: 'Anton', sans-serif; font-size: 22px; letter-spacing: 3px;
+  color: #16041a; background: linear-gradient(90deg, #ff2e88, #ff9a2a);
+  border: none; border-radius: 12px; cursor: pointer;
+  box-shadow: 0 8px 30px rgba(255, 46, 136, .45);
+}
+.make-cover:hover { filter: brightness(1.1); }
+
+/* Before/after proof strip (fix round, item 4). */
+.ba-strip { display: flex; align-items: center; gap: 8px; }
+.ba-strip figure { margin: 0; }
+.ba-strip canvas { display: block; width: 138px; height: 92px; border-radius: 8px; border: 1px solid #3a1a52; }
+.ba-strip figcaption { font-size: 10.5px; color: #b9a3cc; margin-top: 4px; letter-spacing: 1px; }
+.ba-arrow { font-size: 22px; color: #ff2e88; font-weight: 700; }
+
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .panel { border-right: none; border-bottom: 1px solid #2a1040; }

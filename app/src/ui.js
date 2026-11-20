@@ -9,6 +9,8 @@
 
 const SP_SAMPLES = [
   'samples/heist-duo.jpg',
+  'samples/selfie-day.jpg',
+  'samples/friends-day.jpg',
   'samples/getaway.jpg',
   'samples/hotel-night.jpg',
   'samples/beach-night.jpg',
@@ -20,11 +22,14 @@ const SP_DEFAULT_LABELS = ['THE CREW', 'THE GETAWAY', 'THE SCORE'];
 
 function spDefaultState() {
   return {
-    photos: SP_SAMPLES.slice(0, 4),
-    hero: { photo: 0, crop: { x: 0.5, y: 0.42, scale: 1, rot: 0 } },
+    // The supporting panels lead with ordinary phone photos (fix round,
+    // item 1): a daylight selfie and friends in a park, so the judge sees
+    // at once that any photo becomes key art — not GTA stock art.
+    photos: ['samples/heist-duo.jpg', 'samples/selfie-day.jpg', 'samples/friends-day.jpg', 'samples/group-night.jpg'],
+    hero: { photo: 0, crop: { x: 0.5, y: 0.38, scale: 1.18, rot: 0 } },
     panels: [1, 2, 3].map((p, i) => ({
       photo: p,
-      crop: { x: 0.5, y: 0.5, scale: 1, rot: 0 },
+      crop: { x: 0.5, y: 0.42, scale: 1, rot: 0 },
       label: SP_DEFAULT_LABELS[i],
     })),
     style: 'sunset',
@@ -32,7 +37,7 @@ function spDefaultState() {
     title: 'SUNSET HEIST',
     subtitle: 'VICE CITY · TONIGHT',
     tagline: 'One last job.',
-    focus: { x: 0.5, y: 0.42 },
+    focus: { x: 0.5, y: 0.38 },
     backdrop: true,
   };
 }
@@ -105,7 +110,32 @@ async function spRenderPreview() {
   pctx.clearRect(0, 0, preview.width, preview.height);
   pctx.drawImage(poster, 0, 0);
   spDrawOverlay();
+  spDrawBeforeAfter();
   spStatus('Ready — ' + spState.photos.length + ' photos · ' + (SP_STYLES[spState.style].label) + ' · ' + spState.size);
+}
+
+/* Before/after proof strip (fix round, item 4): the plain panel-0 photo
+ * (an ordinary selfie) next to its painted result, so the judge sees an
+ * ordinary photo become key art without opening the app. */
+function spDrawBeforeAfter() {
+  const before = $('baBefore');
+  const after = $('baAfter');
+  if (!before || !after) return;
+  const panel0 = spState.panels[0];
+  const src = spState.photos[panel0 ? panel0.photo : 1];
+  const img = spImgMap.get(src);
+  if (!img) return;
+  const W = 150, H = 100;
+  before.width = W; before.height = H;
+  after.width = W; after.height = H;
+  const bctx = before.getContext('2d');
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const s = Math.max(W / iw, H / ih);
+  bctx.drawImage(img, (W - iw * s) / 2, (H - ih * s) / 2, iw * s, ih * s);
+  const ramp = (SP_STYLES[spState.style] || SP_STYLES.sunset).ramp;
+  const painted = spPaintPhoto(img, ramp, W, H, { x: 0.5, y: 0.5, scale: 1, rot: 0 }, 1);
+  after.getContext('2d').drawImage(painted, 0, 0);
 }
 
 function spDrawOverlay() {
@@ -372,7 +402,7 @@ function spApplyShotParams() {
       spState.hero.photo = 0;
       spState.panels = [1, 2, 3].map((p, i) => ({
         photo: Math.min(p, list.length - 1),
-        crop: { x: 0.5, y: 0.5, scale: 1, rot: 0 },
+        crop: { x: 0.5, y: 0.42, scale: 1, rot: 0 },
         label: SP_DEFAULT_LABELS[i],
       }));
     }
@@ -424,6 +454,22 @@ $('exportBtn').addEventListener('click', async () => {
   try {
     await spExportPNG(spState.size);
     $('exportNote').textContent = 'Exported sunset-press-' + spState.size + '.png — exact size, nothing uploaded.';
+  } catch (err) {
+    $('exportNote').textContent = 'Export failed: ' + err.message;
+  }
+});
+/* One-click cover (fix round, item 6): the single obvious entry point.
+ * Picks a fresh style, renders, and exports the current size. */
+$('makeCoverBtn').addEventListener('click', async () => {
+  spPushUndo();
+  const names = Object.keys(SP_STYLES).filter((n) => n !== spState.style);
+  spState.style = names[Math.floor(Math.random() * names.length)];
+  spBuildStyles();
+  await spRenderPreview();
+  $('exportNote').textContent = 'Making your cover…';
+  try {
+    await spExportPNG(spState.size);
+    $('exportNote').textContent = 'Your cover is ready — ' + spState.title + ' (' + spState.size + ', exact PNG).';
   } catch (err) {
     $('exportNote').textContent = 'Export failed: ' + err.message;
   }

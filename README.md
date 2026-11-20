@@ -36,6 +36,12 @@ PNG to share.
 - **Fast editor.** Live preview that is the true render, click-to-crop
   with drag pan and wheel zoom, a draggable subject-focus ring, undo/redo,
   shuffle, and autosave to localStorage.
+- **One-click cover.** The big MAKE MY COVER button picks a fresh style
+  and exports the current size in one tap.
+- **Before → After proof.** The editor shows your plain photo next to its
+  painted result, so an ordinary phone selfie visibly becomes key art.
+  The built-in samples include ordinary daylight photos (a selfie and
+  friends in a park) alongside the cinematic cast shots.
 
 ## Try it
 

@@ -146,8 +146,17 @@ function spPaintPhoto(img, rampName, W, H, crop, strength) {
       b = b * (1 - k) + 16 * k;
     }
     if (l < 0.38) { // halftone-ish grain in the shadows only
-      const nz = (Math.sin(i * 12.9898) * 43758.5453 % 1) * 14 - 7;
+      const nz = (Math.sin(i * 12.9898) * 43758.5453 % 1) * 21 - 10.5;
       r += nz; g += nz; b += nz;
+    }
+    if (rampName === 'golden' && l > 0.45 && l < 0.85) {
+      // Skin lives in this band: pull ~15% of the yellow warmth out so
+      // faces stay human under the golden grade (fix round, item 9).
+      // The sky keeps its gold — it comes from the backdrop, not this ramp.
+      const avg = (r + g + b) / 3;
+      r = r * 0.85 + avg * 0.15;
+      g = g * 0.85 + avg * 0.15;
+      b = b * 0.85 + avg * 0.15;
     }
     d[i * 4] = Math.max(0, Math.min(255, r));
     d[i * 4 + 1] = Math.max(0, Math.min(255, g));
@@ -228,6 +237,43 @@ function spPalm(ctx, x, y, s, lean, colour) {
   ctx.restore();
 }
 
+/* Painted-sky brushwork (fix round, item 5): flat posterized sky bands
+ * plus a few visible horizontal brush strokes, strongest near the sun,
+ * so the backdrop reads as paint in the first second, not a smooth
+ * digital gradient. */
+function spSkyBrush(ctx, x, y, w, h, sunX, sunY) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  // Posterized sky bands: faint alternating light/dark strips.
+  const bands = 9;
+  for (let i = 0; i < bands; i++) {
+    const by = y + (i / bands) * h * 0.72;
+    const bh = (h * 0.72) / bands;
+    ctx.fillStyle = i % 2 ? 'rgba(255,255,255,0.045)' : 'rgba(20,4,40,0.05)';
+    ctx.fillRect(x, by, w, bh);
+  }
+  // Brush strokes: long flat ellipses, warm light above the sun,
+  // cool rose below it, slightly tilted like a hand stroke.
+  const strokes = [
+    { dx: -0.30, dy: -0.10, len: 0.62, th: 0.030, col: 'rgba(255, 233, 168, 0.16)', tilt: -0.03 },
+    { dx: -0.16, dy: 0.06, len: 0.50, th: 0.024, col: 'rgba(255, 170, 190, 0.13)', tilt: 0.02 },
+    { dx: 0.05, dy: -0.02, len: 0.44, th: 0.020, col: 'rgba(255, 214, 140, 0.12)', tilt: -0.015 },
+  ];
+  for (const s of strokes) {
+    ctx.save();
+    ctx.translate(sunX + s.dx * w, sunY + s.dy * h);
+    ctx.rotate(s.tilt);
+    ctx.fillStyle = s.col;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, (s.len * w) / 2, s.th * h, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 /* Procedural Vice City sunset: banded sky, striped sun, cloud bands,
  * art-deco neon skyline, palm silhouettes. Drawn into (x, y, w, h). */
 function spDrawBackdrop(ctx, x, y, w, h, presetName) {
@@ -274,6 +320,9 @@ function spDrawBackdrop(ctx, x, y, w, h, presetName) {
     th *= 1.25;
   }
   ctx.restore();
+
+  // Painted-sky brushwork over the gradient and the sun's glow edge.
+  spSkyBrush(ctx, x, y, w, h, sunX, sunY);
 
   // Cloud bands.
   const rnd = spRand(20261121);

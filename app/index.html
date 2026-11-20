@@ -26,6 +26,16 @@
       <div class="thumbs" id="photoThumbs"></div>
     </section>
 
+    <section class="ba">
+      <h2>Before → After</h2>
+      <p class="hint">An ordinary phone photo, painted into key art.</p>
+      <div class="ba-strip">
+        <figure><canvas id="baBefore" width="150" height="100"></canvas><figcaption>BEFORE · YOUR PHOTO</figcaption></figure>
+        <div class="ba-arrow">→</div>
+        <figure><canvas id="baAfter" width="150" height="100"></canvas><figcaption>AFTER · SUNSET PRESS</figcaption></figure>
+      </div>
+    </section>
+
     <section>
       <h2>2 · Poster style</h2>
       <p class="hint">Each style sets the layout grade, lettering and backdrop together.</p>
@@ -67,6 +77,7 @@
   </aside>
 
   <section class="stage">
+    <button class="make-cover" id="makeCoverBtn" type="button">★ MAKE MY COVER</button>
     <div class="canvas-wrap" id="canvasWrap">
       <canvas id="preview"></canvas>
       <div class="stage-hint" id="stageHint">Click a panel to crop it · drag to pan · wheel to zoom · drag the pink ring to move the subject focus</div>
