@@ -17,7 +17,7 @@
   <aside class="panel">
     <section>
       <h2>1 · Photos</h2>
-      <p class="hint">Drop photos anywhere, or pick a file. One photo fills every panel; several fill them in order.</p>
+      <p class="hint">Drop photos anywhere, or pick a file.</p>
       <div class="row">
         <label class="btn" for="fileInput">Add photos…</label>
         <input type="file" id="fileInput" accept="image/*" multiple hidden>
@@ -28,8 +28,9 @@
 
     <section>
       <h2>2 · Poster style</h2>
-      <p class="hint">Each style sets the layout grade, lettering and backdrop together.</p>
+      <p class="hint">Each style sets the grade and lettering.</p>
       <div class="styles" id="styleCards"></div>
+      <label class="toggle"><input type="checkbox" id="backdropToggle"> Sunset backdrop — skyline behind the hero</label>
     </section>
 
     <section>
@@ -49,9 +50,9 @@
     <section class="export">
       <h2>4 · Size &amp; export</h2>
       <div class="sizes" id="sizeTabs">
-        <button type="button" data-size="square" class="on">1:1 · 1080×1080</button>
-        <button type="button" data-size="portrait">4:5 · 1080×1350</button>
-        <button type="button" data-size="wide">16:9 · 1920×1080</button>
+        <button type="button" data-size="square" class="on">1:1<small>1080×1080</small></button>
+        <button type="button" data-size="portrait">4:5<small>1080×1350</small></button>
+        <button type="button" data-size="wide">16:9<small>1920×1080</small></button>
       </div>
       <div class="row">
         <button class="btn primary" id="exportBtn" type="button">Export this size</button>
@@ -62,7 +63,7 @@
         <button class="btn ghost" id="undoBtn" type="button">Undo</button>
         <button class="btn ghost" id="redoBtn" type="button">Redo</button>
       </div>
-      <p class="hint" id="exportNote">Exports are exact-size PNGs, saved to your machine. Nothing is uploaded.</p>
+      <p class="hint" id="exportNote">Exact-size PNGs, saved to your machine.</p>
     </section>
   </aside>
 

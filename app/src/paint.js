@@ -74,7 +74,11 @@ function spRampAt(ramp, t) {
 }
 
 /* Draw img to cover (dx, dy, dw, dh) with a crop transform.
- * crop: {x, y} centre in 0..1 of the source, scale >= 1 zoom, rot radians. */
+ * crop: {x, y} centre in 0..1 of the source, scale >= 1 zoom, rot radians.
+ * The offsets are clamped so the drawn image always covers the rect
+ * (fix round 4): a crop that pans past the edge used to leave a dark
+ * band at the top of the hero; now the image stops at the edge instead
+ * of sliding out of frame. */
 function spCoverDraw(ctx, img, dx, dy, dw, dh, crop) {
   const iw = img.naturalWidth || img.width;
   const ih = img.naturalHeight || img.height;
@@ -87,8 +91,12 @@ function spCoverDraw(ctx, img, dx, dy, dw, dh, crop) {
   ctx.translate(-cx, -cy);
   const sw = iw * base;
   const sh = ih * base;
-  const ox = cx - sw / 2 + (0.5 - (crop.x ?? 0.5)) * sw * 0.35;
-  const oy = cy - sh / 2 + (0.5 - (crop.y ?? 0.5)) * sh * 0.35;
+  let ox = cx - sw / 2 + (0.5 - (crop.x ?? 0.5)) * sw * 0.35;
+  let oy = cy - sh / 2 + (0.5 - (crop.y ?? 0.5)) * sh * 0.35;
+  if (sw >= dw) ox = Math.max(dx + dw - sw, Math.min(dx, ox));
+  else ox = dx + (dw - sw) / 2;
+  if (sh >= dh) oy = Math.max(dy + dh - sh, Math.min(dy, oy));
+  else oy = dy + (dh - sh) / 2;
   ctx.drawImage(img, ox, oy, sw, sh);
   ctx.restore();
 }
@@ -205,33 +213,6 @@ function spHeroMask(w, h) {
   return mask;
 }
 
-/* A feathered ellipse mask canvas (white centre fading to transparent),
- * for the subject-focus cutout. focus: {x, y} in 0..1, rx/ry in pixels. */
-function spFocusMask(W, H, focus, rx, ry) {
-  const m = spCanvas(W, H);
-  const ctx = m.getContext('2d');
-  const cx = focus.x * W;
-  const cy = focus.y * H;
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 1);
-  // Radial gradients are circular; scale the context to make it elliptical.
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.scale(rx, ry);
-  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-  // Fully opaque across 80% of the radius (fix round 3, item 3: the
-  // old 92% stop left only an 8% feather, which cut a hard step
-  // across the chin where the title breakout dips over the letters),
-  // with a 20% feather at the edge so the breakout melts into the
-  // title instead of slicing across a face.
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.80, 'rgba(255,255,255,1)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(-1, -1, 2, 2);
-  ctx.restore();
-  return m;
-}
-
 /* Seeded pseudo-random, so the backdrop is identical on every render. */
 function spRand(seed) {
   let t = seed >>> 0;
@@ -271,11 +252,15 @@ function spPalm(ctx, x, y, s, lean, colour) {
   ctx.restore();
 }
 
-/* Face zone per sample photo (fix round 2, item 5): the vertical centre
- * of the faces, as a fraction of the photo height, so panel crops frame
- * faces instead of cutting heads. */
+/* Face zone per sample photo (fix round 2, item 5; selfie corrected
+ * fix round 4, item 3): the vertical centre of the faces, as a fraction
+ * of the photo height, so panel crops frame faces instead of cutting
+ * heads. The selfie-day face is LOW in its tall frame — forehead
+ * ~0.28, eyes ~0.42, nose ~0.50, mouth ~0.60 — so its zone is 0.53,
+ * not 0.22: the old value centred the panel window on the wall above
+ * the face and cut the mouth off. */
 const SP_FACE_Y = {
-  'samples/selfie-day.jpg': 0.22,
+  'samples/selfie-day.jpg': 0.53,
   'samples/friends-day.jpg': 0.10,
   'samples/group-night.jpg': 0.22,
   'samples/heist-duo.jpg': 0.30,

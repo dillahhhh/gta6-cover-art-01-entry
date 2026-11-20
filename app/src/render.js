@@ -13,15 +13,19 @@ const SP_SIZES = {
   wide: { w: 1920, h: 1080 },
 };
 
-/* Fractional layout per size: hero rect, three supporting rects,
- * title band, footer. Fractions of (W, H). */
+/* Fractional layout per size: supporting rects, title band, footer.
+ * The hero is the whole poster now (fix round 4, item 2): one full-bleed
+ * photo, top to bottom, painted over the full canvas — no hero column,
+ * no skyline band splitting it. The title, tagline and footer sit ON the
+ * photo over a dark bottom gradient, and the three supporting panels
+ * float on the photo's right side. Fractions of (W, H). */
 function spLayoutFor(sizeName) {
   // (fix round 2, item 8: the portrait band was too tall — the tagline
   // sat ~200 px above the footer with dead air between them. The band
   // is shorter now and the footer rides up to meet it.)
   if (sizeName === 'portrait') {
     return {
-      hero: { x: 0, y: 0, w: 0.62, h: 0.54 },
+      hero: { x: 0, y: 0, w: 1, h: 1 },
       supports: [
         { x: 0.635, y: 0, w: 0.365, h: 0.16 },
         { x: 0.635, y: 0.185, w: 0.365, h: 0.16 },
@@ -35,20 +39,23 @@ function spLayoutFor(sizeName) {
   }
   if (sizeName === 'wide') {
     return {
-      hero: { x: 0, y: 0, w: 0.56, h: 0.70 },
+      hero: { x: 0, y: 0, w: 1, h: 1 },
       supports: [
         { x: 0.575, y: 0, w: 0.425, h: 0.22 },
         { x: 0.575, y: 0.24, w: 0.425, h: 0.22 },
         { x: 0.575, y: 0.48, w: 0.425, h: 0.22 },
       ],
-      title: { x: 0, y: 0.715, w: 1, h: 0.20 },
+      // Fix round 4, item 5: the title band is taller (was 0.715 /
+      // 0.20) so the grown 16:9 wordmark (≥55% of the canvas) fits
+      // with its extrusion clear of the tagline.
+      title: { x: 0, y: 0.70, w: 1, h: 0.24 },
       // Fix round 3, item 4: the footer meets the title band (was
       // 0.93), so the dark strip under the title on the right is gone.
-      footer: { x: 0, y: 0.915, w: 1, h: 0.085 },
+      footer: { x: 0, y: 0.94, w: 1, h: 0.06 },
     };
   }
   return {
-    hero: { x: 0, y: 0, w: 0.63, h: 0.66 },
+    hero: { x: 0, y: 0, w: 1, h: 1 },
     supports: [
       { x: 0.645, y: 0, w: 0.355, h: 0.18 },
       { x: 0.645, y: 0.205, w: 0.355, h: 0.20 },
@@ -86,7 +93,11 @@ function spSetSpacing(ctx, px) {
 }
 
 /* The 3D wordmark: hard offset extrusion, neon glow, vertical gradient
- * fill, dark outline, white top highlight. Title fills ~70% of the width. */
+ * fill, dark outline, white top highlight. The title fills the band:
+ * it shrinks to fit 80% of the width, and it GROWS to at least 62% —
+ * on 16:9 the band is short, so a height-only fit left the wordmark at
+ * ~38% of the canvas (fix round 4, item 5). Growth is capped so the
+ * letters + extrusion still clear the tagline. */
 function spDrawTitle(ctx, text, cx, cy, maxW, maxH, style) {
   // Start big and shrink to fit the width: on wide posters the band is
   // short but the width is plentiful, so the title must grow to fill it.
@@ -96,6 +107,10 @@ function spDrawTitle(ctx, text, cx, cy, maxW, maxH, style) {
   const setFont = (s) => { ctx.font = s + 'px Anton, "Arial Black", sans-serif'; };
   setFont(Math.round(size));
   spSetSpacing(ctx, Math.max(1, size * 0.02));
+  while (ctx.measureText(text).width < maxW * 0.62 && size < maxH * 1.5) {
+    size *= 1.06;
+    setFont(Math.round(size));
+  }
   while (ctx.measureText(text).width > maxW * 0.80 && size > 24) {
     size *= 0.94;
     setFont(Math.round(size));
@@ -157,41 +172,6 @@ function spDrawPill(ctx, x, y, text, accent, posterW) {
   return { w: tw + pad * 2, h };
 }
 
-/* Faint skyline strip behind the portrait poster's footer, so the bottom
- * of the poster is never empty black (fix round, item 8). Buildings are
- * a touch lighter than the background, with a few neon windows. */
-function spMiniSkyline(ctx, x, y, w, h, accent) {
-  if (h <= 4) return;
-  const rnd = spRand(5150);
-  ctx.save();
-  // Buildings clearly lighter than the poster's near-black footer
-  // (fix round 2, item 8: the old #1c0a2c was invisible on #12061f).
-  ctx.fillStyle = '#3a1a5e';
-  let bx = x;
-  while (bx < x + w) {
-    const bw = w * (0.04 + rnd() * 0.06);
-    // Shorter buildings (fix round 3, item 4): the strip now runs to
-    // the bottom of the canvas, so the old 0.35–0.95 range would build
-    // a wall; 0.22–0.55 reads as a city base under the footer text.
-    const bh = h * (0.22 + rnd() * 0.33);
-    ctx.fillRect(bx, y + h - bh, bw, bh);
-    for (let wy = y + h - bh + 4; wy < y + h - 3; wy += 7) {
-      if (rnd() > 0.5) {
-        ctx.fillStyle = accent;
-        ctx.globalAlpha = 0.9;
-        ctx.fillRect(bx + bw * 0.25, wy, 2.5, 3);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#3a1a5e';
-      }
-    }
-    bx += bw + 2;
-  }
-  // Fix round 3, item 2: the 2 px accent rule that used to run across
-  // the top of this strip is gone — it read as a stray divider line
-  // under the title, with no function.
-  ctx.restore();
-}
-
 /* Final unified grade: vignette, warm sun-side wash, fine grain. */
 function spGrade(ctx, W, H, style) {
   const v = ctx.createRadialGradient(W / 2, H * 0.42, Math.min(W, H) * 0.42, W / 2, H * 0.5, Math.max(W, H) * 0.75);
@@ -221,7 +201,15 @@ function spGrade(ctx, W, H, style) {
 
 /* Render the full poster. state: {photos, hero, panels, style, title,
  * subtitle, tagline, focus, backdrop}. imgMap: src -> loaded Image.
- * scale: render at W*scale (1 = export size, ~0.15 = style thumbnail). */
+ * scale: render at W*scale (1 = export size, ~0.15 = style thumbnail).
+ *
+ * Fix round 4 layout: the hero is ONE full-bleed photo over the whole
+ * canvas — no skyline band splitting it, no second hero draw over the
+ * title (the "ghost face"). The title, tagline and footer sit on the
+ * photo over a dark bottom gradient; the three supporting panels float
+ * on the photo's right side. The procedural sunset backdrop is opt-in
+ * only (state.backdrop, default off): when on, the photo fades into
+ * the skyline in the lower half and the title gets its dark band back. */
 function spRenderPoster(state, sizeName, scale, imgMap) {
   const dims = SP_SIZES[sizeName];
   const W = Math.round(dims.w * scale);
@@ -235,74 +223,82 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   ctx.fillStyle = '#12061f';
   ctx.fillRect(0, 0, W, H);
 
-  const heroR = R(L.hero);
+  // One painting level for hero and panels (fix round 4, item 4):
+  // 0.47 — the same preset everywhere, so the poster reads as one
+  // painted world instead of three different treatments.
+  const PAINT = 0.47;
+
+  // Hero: ONE full-bleed painted photo, top to bottom (fix round 4,
+  // item 2) — no skyline band splitting it, no neon frame (its right
+  // edge was the thin stray line on the wide hero). The procedural
+  // sunset backdrop is opt-in only (state.backdrop, default off):
+  // when on, the photo fades into the skyline in the lower half.
   const heroImg = imgMap.get(state.photos[state.hero.photo]);
   let heroPainted = null;
   if (heroImg) {
-    heroPainted = spPaintPhoto(heroImg, style.ramp, Math.max(2, Math.round(heroR.w)), Math.max(2, Math.round(heroR.h)), state.hero.crop, 0.35);
+    heroPainted = spPaintPhoto(heroImg, style.ramp, W, H, state.hero.crop, PAINT);
   }
-
-  // Hero: procedural sunset backdrop, then the painted photo cut out
-  // through the draggable subject-focus ellipse.
   if (state.backdrop) {
-    spDrawBackdrop(ctx, heroR.x, heroR.y, heroR.w, heroR.h, style.backdrop);
+    spDrawBackdrop(ctx, 0, 0, W, H, style.backdrop);
   }
   if (heroPainted) {
     if (state.backdrop) {
-      // Full-bleed vertical fade (fix round 2, item 1): the photo fills
-      // the hero to every edge and fades into the sunset at the chests,
-      // so the car's dark hood — the upside-down "reflection" — never
-      // shows, and there is no oval sticker edge at all.
-      const mask = spHeroMask(Math.round(heroR.w), Math.round(heroR.h));
-      const cut = spCanvas(heroR.w, heroR.h);
+      const mask = spHeroMask(W, H);
+      const cut = spCanvas(W, H);
       const cctx = cut.getContext('2d');
       cctx.drawImage(heroPainted, 0, 0);
       cctx.globalCompositeOperation = 'destination-in';
       cctx.drawImage(mask, 0, 0);
-      ctx.drawImage(cut, heroR.x, heroR.y);
+      ctx.drawImage(cut, 0, 0);
     } else {
-      ctx.drawImage(heroPainted, heroR.x, heroR.y);
+      ctx.drawImage(heroPainted, 0, 0);
     }
-    // Thin neon frame around the hero — top, left and right only
-    // (fix round 3, item 3): the frame's bottom edge crossed the fade
-    // zone as a hard line exactly where the shoulders melt into the
-    // skyline. Leaving the bottom open lets the photo dissolve.
-    ctx.strokeStyle = style.gutter;
-    ctx.globalAlpha = 0.85;
-    ctx.lineWidth = Math.max(2, W * 0.003);
-    ctx.beginPath();
-    ctx.moveTo(heroR.x, heroR.y + heroR.h);
-    ctx.lineTo(heroR.x, heroR.y);
-    ctx.lineTo(heroR.x + heroR.w, heroR.y);
-    ctx.lineTo(heroR.x + heroR.w, heroR.y + heroR.h);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
   }
 
-  // Supporting panels: each a different treatment, slanted cut, neon gutter.
+  // Dark bottom gradient over the full width, so the title, tagline
+  // and footer read over the photo (and over the skyline when the
+  // backdrop is on). No hard band rect, no accent rule — the old
+  // 3 px rule read as a stray divider line.
+  const grad = ctx.createLinearGradient(0, H * 0.50, 0, H);
+  grad.addColorStop(0, 'rgba(10, 3, 18, 0)');
+  grad.addColorStop(0.55, 'rgba(10, 3, 18, 0.45)');
+  grad.addColorStop(1, 'rgba(10, 3, 18, 0.78)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, H * 0.50, W, H * 0.50);
+
+  // Supporting panels: one warm family, painted at 2x and drawn down
+  // (fix round 4, item 4), slanted cut, neon gutter.
   const labels = ['THE CREW', 'THE GETAWAY', 'THE SCORE'];
+  // A beach with no people is THE SHORE, graded golden (fix round 4,
+  // item 8) — never the purple vice ramp, whatever slot it lands in.
+  const SP_PHOTO_RAMP = {
+    'samples/beach-night.jpg': 'golden',
+    'samples/palm-beach.jpg': 'golden',
+  };
   L.supports.forEach((f, i) => {
     const p = R(f);
     const panel = state.panels[i];
     if (!panel) return;
     const img = imgMap.get(state.photos[panel.photo]);
     if (!img) return;
-    // Wide posters grade all three panels from one warm family
-    // (fix round 2, item 9): sunset / golden / vice, not three moods.
-    const ramp = sizeName === 'wide'
-      ? ['sunset', 'golden', 'vice'][i]
-      : style.panels[i % style.panels.length];
+    const ramp = SP_PHOTO_RAMP[state.photos[panel.photo]]
+      || (sizeName === 'wide'
+        ? ['sunset', 'golden', 'vice'][i]
+        : style.panels[i % style.panels.length]);
     // Face-zone crop (item 5): the panel's crop centres on the photo's
     // faces (upper third by default), never on its middle.
     const faceCrop = { ...panel.crop, y: spFaceY(state.photos[panel.photo]) };
-    const painted = spPaintPhoto(img, ramp, Math.max(2, Math.round(p.w)), Math.max(2, Math.round(p.h)), faceCrop, 0.35);
+    // Painted at 2x and drawn down: the ink and posterize stay crisp
+    // instead of blurring up from panel resolution.
+    const painted = spPaintPhoto(img, ramp,
+      Math.max(2, Math.round(p.w * 2)), Math.max(2, Math.round(p.h * 2)), faceCrop, PAINT);
     ctx.save();
     spSlantPath(ctx, p.x, p.y, p.w, p.h);
     ctx.clip();
     // Wide posters: lift the right panels ~12% brighter and pull the
     // magenta back a little so both sides read as one world (fix item 7).
     if (sizeName === 'wide') ctx.filter = 'brightness(1.12) saturate(0.92)';
-    ctx.drawImage(painted, p.x, p.y);
+    ctx.drawImage(painted, p.x, p.y, p.w, p.h);
     ctx.filter = 'none';
     ctx.restore();
     ctx.save();
@@ -331,45 +327,22 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
       style.accent, W);
   });
 
-  // Title band: dark translucent band, then the breakout, then the wordmark.
+  // Title: on the photo over the bottom gradient — no breakout draw.
+  // The second hero fragment over the letters was the "ghost face"
+  // (fix round 4, item 1); the title sits cleanly on its own
+  // background now. With the backdrop on, the title gets its dark
+  // band back (the old composition), still with no accent rule.
   const tR = R(L.title);
-  ctx.fillStyle = 'rgba(10, 3, 18, 0.55)';
-  ctx.fillRect(tR.x, tR.y, tR.w, tR.h);
-  ctx.fillStyle = style.accent;
-  ctx.globalAlpha = 0.9;
-  ctx.fillRect(tR.x, tR.y, tR.w, Math.max(2, 3 * scale));
-  ctx.globalAlpha = 1;
+  if (state.backdrop) {
+    ctx.fillStyle = 'rgba(10, 3, 18, 0.55)';
+    ctx.fillRect(tR.x, tR.y, tR.w, tR.h);
+  }
 
   // Wordmark + tagline. The title sits lower in its band and the tagline
   // closer under it (fix round 2, item 8): no more dead air inside the band.
   const titleCx = tR.x + tR.w / 2;
   const titleCy = tR.y + tR.h * 0.50;
-  const titleSize = spDrawTitle(ctx, state.title, titleCx, titleCy, tR.w, tR.h * 0.70, style);
-
-  // Hero breakout (fix round 2, item 7): the subjects' SHOULDERS and
-  // upper chests re-drawn over the top of the title letters — never the
-  // faces, never a full-width strip. The breakout's bottom lands ~26 px
-  // below the top of the capitals (its mask fades out first), so the
-  // shoulders cross the letters' tops and the letters stay readable.
-  // The strip is centred on the couple (hero width) and fades at both
-  // ends, so the outer letters stay clean.
-  if (heroPainted) {
-    const boH = heroR.h * 0.24;
-    const bo = spCanvas(heroR.w, boH);
-    const bctx = bo.getContext('2d');
-    bctx.drawImage(heroPainted, 0, -heroR.h * 0.25, heroR.w, heroR.h);
-    const bmask = spFocusMask(Math.round(heroR.w), Math.round(boH),
-      { x: state.focus.x, y: 0.42 }, heroR.w * 0.30, boH * 0.50);
-    bctx.globalCompositeOperation = 'destination-in';
-    bctx.drawImage(bmask, 0, 0);
-    const tops = titleCy - titleSize * 0.35;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(tR.x, tR.y, tR.w, tR.h);
-    ctx.clip();
-    ctx.drawImage(bo, heroR.x, tops + 40 - boH);
-    ctx.restore();
-  }
+  spDrawTitle(ctx, state.title, titleCx, titleCy, tR.w, tR.h * 0.70, style);
 
   if (state.tagline) {
     // Bebas Neue, not script/serif (fix round 2, item 6): the tagline
@@ -386,15 +359,10 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
     spSetSpacing(ctx, 0);
   }
 
-  // Footer: star row, subtitle, press mark. On portrait the footer sits
-  // on a faint skyline so the bottom is never empty black (fix item 8).
+  // Footer: star row, subtitle, press mark — on the bottom gradient,
+  // so it reads over the photo in every size (fix round 4, item 2:
+  // the portrait mini-skyline is gone with the rest of the skyline).
   const fR = R(L.footer);
-  if (sizeName === 'portrait') {
-    // Fix round 3, item 4: the skyline runs from the footer to the
-    // very bottom of the canvas, so no dead black band is left under
-    // the footer — the footer text sits on the skyline.
-    spMiniSkyline(ctx, fR.x, fR.y, fR.w, H - fR.y, style.accent);
-  }
   const fy = fR.y + fR.h / 2;
   // Bebas Neue for the stars too (fix round 3, item 1: the last
   // plain `sans-serif` in the renderer — pinned so no text on any

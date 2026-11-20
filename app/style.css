@@ -28,9 +28,9 @@ body {
 .tagline { font-family: 'Bebas Neue', sans-serif; font-size: 19px; letter-spacing: 2px; color: #ff9ecf; }
 .top-status { margin-left: auto; font-size: 12px; color: #b9a3cc; }
 
-.layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; align-items: start; }
-.panel { padding: 12px 18px 12px; border-right: 1px solid #2a1040; }
-.panel section { margin-bottom: 8px; }
+.layout { display: grid; grid-template-columns: 320px 1fr; gap: 0; align-items: start; }
+.panel { padding: 8px 18px 24px; border-right: 1px solid #2a1040; }
+.panel section { margin-bottom: 4px; }
 /* Export bar (fix round 3, item 5): the old `position: sticky;
  * bottom: 0` pulled this section up to the viewport bottom and
  * COVERED the whole Caption section — the editor screenshot showed
@@ -40,14 +40,14 @@ body {
  * flow and Export stays visible without scrolling. */
 .panel section.export {
   background: #160a24; border-top: 1px solid #3a1a52;
-  padding-top: 8px; margin-bottom: 0;
+  padding-top: 8px; padding-bottom: 14px; margin-bottom: 0;
 }
 .panel h2 {
-  font-family: 'Bebas Neue', sans-serif; font-size: 19px; letter-spacing: 2px;
-  color: #ffb3d1; margin: 0 0 4px;
+  font-family: 'Bebas Neue', sans-serif; font-size: 18px; letter-spacing: 2px;
+  color: #ffb3d1; margin: 0 0 2px;
 }
-.hint { color: #b9a3cc; font-size: 12.5px; margin: 0 0 8px; }
-.row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.hint { color: #b9a3cc; font-size: 12.5px; margin: 0 0 6px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .btn {
   appearance: none; border: 1px solid #ff2e88; background: #ff2e88; color: #16041a;
   font-weight: 700; font-size: 13px; padding: 8px 14px; border-radius: 8px; cursor: pointer;
@@ -59,42 +59,49 @@ body {
 
 .thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
 .thumbs img {
-  width: 56px; height: 56px; object-fit: cover; border-radius: 8px; cursor: pointer;
+  width: 48px; height: 48px; object-fit: cover; border-radius: 8px; cursor: pointer;
   border: 2px solid transparent;
 }
 .thumbs img.sel { border-color: #ff2e88; }
 .thumbs img.used { outline: 2px solid #2affd5; outline-offset: -2px; }
 
 .styles { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.toggle { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-size: 12.5px; color: #d9c2ec; cursor: pointer; }
+.toggle input { margin-top: 2px; accent-color: #ff2e88; }
 .style-card {
   border: 1px solid #3a1a52; border-radius: 10px; overflow: hidden; cursor: pointer;
   background: #16041f; padding: 0; text-align: left; color: inherit;
 }
 .style-card.on { border-color: #ff2e88; box-shadow: 0 0 0 2px #ff2e88, 0 0 18px rgba(255, 46, 136, .35); }
-.style-card canvas { display: block; width: 100%; height: 40px; object-fit: cover; }
-.style-card span { display: block; padding: 5px 8px; font-size: 12px; font-weight: 700; }
+.style-card canvas { display: block; width: 100%; height: 34px; object-fit: cover; }
+.style-card span { display: block; padding: 4px 8px; font-size: 12px; font-weight: 700; }
 
-.field { display: block; font-size: 12px; color: #b9a3cc; margin-bottom: 6px; }
+.field { display: block; font-size: 12px; color: #b9a3cc; margin-bottom: 4px; }
 .field input {
-  display: block; width: 100%; margin-top: 3px; padding: 6px 10px;
+  display: block; width: 100%; margin-top: 3px; padding: 5px 10px;
   background: #1c0a28; border: 1px solid #3a1a52; border-radius: 8px; color: #fff;
   font-size: 14px;
 }
 .field input:focus { outline: 2px solid #ff2e88; border-color: #ff2e88; }
 .labels { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 .labels input {
-  width: 100%; padding: 6px 6px; background: #1c0a28; border: 1px solid #3a1a52;
+  width: 100%; padding: 5px 6px; background: #1c0a28; border: 1px solid #3a1a52;
   border-radius: 6px; color: #fff; font-size: 11px;
 }
-.sizes { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+/* Size tabs in one row (fix round 4, item 9): three stacked buttons
+ * cost ~100 px of sidebar height and pushed Export below the fold at
+ * 900 px. One row of three compact buttons, size on top and dimensions
+ * small underneath, frees the room Export needs. */
+.sizes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 8px; }
 .sizes button {
-  text-align: left; background: #1c0a28; color: #f5e9ff; border: 1px solid #3a1a52;
-  border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px;
+  text-align: center; background: #1c0a28; color: #f5e9ff; border: 1px solid #3a1a52;
+  border-radius: 8px; padding: 6px 4px; cursor: pointer; font-size: 13px; font-weight: 700;
 }
+.sizes button small { display: block; font-size: 11px; font-weight: 400; color: #b9a3cc; }
 .sizes button.on { border-color: #ff2e88; background: #2a0a35; }
 
-.stage { padding: 18px 22px; min-width: 0; }
-.canvas-wrap { display: block; text-align: center; }
+.stage { padding: 18px 22px; min-width: 0; display: flex; flex-direction: column; min-height: calc(100vh - 49px); }
+.canvas-wrap { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; text-align: center; min-height: 0; }
 #preview {
   display: block; margin: 0 auto;
   max-width: 100%; max-height: calc(100vh - 200px);

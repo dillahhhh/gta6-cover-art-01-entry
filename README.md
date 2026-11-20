@@ -17,19 +17,22 @@ PNG to share.
   canvas pipeline — smoothing, a posterized gradient map, a Sobel ink
   outline, shadow grain and a rim light — so each panel reads as
   illustration, not a filtered photo.
-- **Hero + supporting cast composition.** One big hero panel (about 55% of
-  the canvas) with the subject breaking out of the frame over the title,
-  plus three slanted supporting panels, each in a different colour
-  treatment, with editable pill labels.
-- **Procedural Vice City sunset.** The hero backdrop is painted in code —
-  a striped sun, banded clouds, a neon art-deco skyline and palm
-  silhouettes — behind a draggable subject-focus mask you place yourself.
+- **Full-bleed hero + supporting cast composition.** One painted photo
+  fills the whole poster, top to bottom, with the title, tagline and
+  footer sitting on it over a dark bottom gradient, plus three slanted
+  supporting panels on the right, each in a warm colour treatment, with
+  editable pill labels.
+- **Procedural Vice City sunset (opt-in).** A "Sunset backdrop" toggle
+  paints the skyline in code — a striped sun, banded clouds, a neon
+  art-deco skyline and palm silhouettes — behind the hero photo, which
+  fades into it in the lower half. Off by default: the hero is one
+  full photo.
 - **Big original lettering.** A huge gold-to-pink 3D wordmark with
   extrusion, outline, neon glow and a top highlight, set in SIL Open Font
-  License faces bundled under `app/fonts/` (Anton, Bebas Neue, Yellowtail).
+  License faces bundled under `app/fonts/` (Anton, Bebas Neue).
   No Rockstar logo, artwork or font anywhere.
 - **6 poster styles** (Sunset, Neon Night, Teal Dusk, Mono Pink, Golden
-  Hour, Vice Pop), each setting the grade, lettering and backdrop together,
+  Hour, Vice Pop), each setting the grade and lettering together,
   shown as live thumbnails of your actual photo.
 - **Exact export sizes.** 1080×1080, 1080×1350 and 1920×1080, each
   re-laid out (not just re-cropped), exported as exact-size PNGs.

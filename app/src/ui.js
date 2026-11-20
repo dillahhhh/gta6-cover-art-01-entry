@@ -41,7 +41,9 @@ function spDefaultState() {
     subtitle: 'VICE CITY · TONIGHT',
     tagline: 'One last job.',
     focus: { x: 0.5, y: 0.28 },
-    backdrop: true,
+    // Sunset backdrop OFF by default (fix round 4, item 2): the hero is
+    // one full photo; the procedural skyline is opt-in via the toggle.
+    backdrop: false,
   };
 }
 
@@ -90,9 +92,16 @@ async function spEnsureImages() {
 
 function spPreviewScale() {
   const dims = SP_SIZES[spState.size];
-  // Bigger preview (fix round 2, item 10): the judge should see the
-  // poster, not a thumbnail.
-  return Math.min(700 / dims.w, 700 / dims.h);
+  // Fill the stage (fix round 4, item 7): the scale comes from the
+  // stage's own size, not a fixed 700 px cap — the poster grows to the
+  // biggest size that fits the stage, so the stage never sits half
+  // empty under a small poster. Capped so the bitmap stays sane.
+  const stage = document.querySelector('.stage');
+  const availW = Math.max(320, (stage ? stage.clientWidth : 900) - 44);
+  const availH = Math.max(320, window.innerHeight - 250);
+  const s = Math.min(availW / dims.w, availH / dims.h);
+  const cap = 1000 / Math.max(dims.w, dims.h);
+  return Math.min(s, cap);
 }
 
 function spLayoutPx() {
@@ -125,11 +134,17 @@ function spDrawOverlay() {
   const r = rects[sel];
   if (!r) return;
   pctx.save();
-  pctx.strokeStyle = '#ff2e88';
-  pctx.lineWidth = 2;
-  pctx.setLineDash([8, 6]);
-  pctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-  pctx.setLineDash([]);
+  // The hero is the whole poster now (fix round 4, item 2), so a
+  // dashed rect around it would just frame the entire poster — draw
+  // only the subject-focus ring for the hero, and the dashed rect for
+  // the supporting panels.
+  if (spSelected !== 'hero') {
+    pctx.strokeStyle = '#ff2e88';
+    pctx.lineWidth = 2;
+    pctx.setLineDash([8, 6]);
+    pctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    pctx.setLineDash([]);
+  }
   // Subject-focus ring on the hero.
   if (spSelected === 'hero') {
     const fx = hero.x + spState.focus.x * hero.w;
@@ -254,6 +269,7 @@ function spSyncInputs() {
   $('titleInput').value = spState.title;
   $('subtitleInput').value = spState.subtitle;
   $('taglineInput').value = spState.tagline;
+  $('backdropToggle').checked = !!spState.backdrop;
   spBuildLabels();
   spBuildStrip();
   spBuildThumbs();
@@ -399,6 +415,9 @@ function spApplyShotParams() {
   if (q.get('subtitle')) spState.subtitle = q.get('subtitle').toUpperCase();
   if (q.get('tagline') !== null) spState.tagline = q.get('tagline');
   if (q.get('size') && SP_SIZES[q.get('size')]) spState.size = q.get('size');
+  // Backdrop toggle (fix round 4, item 2): off by default; ?backdrop=1
+  // forces the old skyline composition on for a test shot.
+  if (q.get('backdrop') !== null) spState.backdrop = q.get('backdrop') === '1';
   const shot = q.get('shot');
   if (shot === 'portrait') spState.size = 'portrait';
   if (shot === 'wide') spState.size = 'wide';
@@ -423,6 +442,11 @@ $('sampleBtn').addEventListener('click', () => {
 });
 $('titleInput').addEventListener('input', (e) => { spState.title = e.target.value.toUpperCase(); spScheduleRender(); });
 $('titleInput').addEventListener('change', () => spPushUndo());
+$('backdropToggle').addEventListener('change', (e) => {
+  spPushUndo();
+  spState.backdrop = e.target.checked;
+  spScheduleRender();
+});
 $('subtitleInput').addEventListener('input', (e) => { spState.subtitle = e.target.value.toUpperCase(); spScheduleRender(); });
 $('subtitleInput').addEventListener('change', () => spPushUndo());
 $('taglineInput').addEventListener('input', (e) => { spState.tagline = e.target.value; spScheduleRender(); });
