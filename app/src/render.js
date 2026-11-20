@@ -28,7 +28,9 @@ function spLayoutFor(sizeName) {
         { x: 0.635, y: 0.37, w: 0.365, h: 0.16 },
       ],
       title: { x: 0, y: 0.545, w: 1, h: 0.22 },
-      footer: { x: 0, y: 0.80, w: 1, h: 0.09 },
+      // Fix round 3, item 4: the footer rides up to meet the title
+      // band (was 0.80), so the dark strip between them is gone.
+      footer: { x: 0, y: 0.77, w: 1, h: 0.09 },
     };
   }
   if (sizeName === 'wide') {
@@ -40,7 +42,9 @@ function spLayoutFor(sizeName) {
         { x: 0.575, y: 0.48, w: 0.425, h: 0.22 },
       ],
       title: { x: 0, y: 0.715, w: 1, h: 0.20 },
-      footer: { x: 0, y: 0.93, w: 1, h: 0.07 },
+      // Fix round 3, item 4: the footer meets the title band (was
+      // 0.93), so the dark strip under the title on the right is gone.
+      footer: { x: 0, y: 0.915, w: 1, h: 0.085 },
     };
   }
   return {
@@ -166,7 +170,10 @@ function spMiniSkyline(ctx, x, y, w, h, accent) {
   let bx = x;
   while (bx < x + w) {
     const bw = w * (0.04 + rnd() * 0.06);
-    const bh = h * (0.35 + rnd() * 0.6);
+    // Shorter buildings (fix round 3, item 4): the strip now runs to
+    // the bottom of the canvas, so the old 0.35–0.95 range would build
+    // a wall; 0.22–0.55 reads as a city base under the footer text.
+    const bh = h * (0.22 + rnd() * 0.33);
     ctx.fillRect(bx, y + h - bh, bw, bh);
     for (let wy = y + h - bh + 4; wy < y + h - 3; wy += 7) {
       if (rnd() > 0.5) {
@@ -179,9 +186,9 @@ function spMiniSkyline(ctx, x, y, w, h, accent) {
     }
     bx += bw + 2;
   }
-  ctx.fillStyle = accent;
-  ctx.globalAlpha = 0.8;
-  ctx.fillRect(x, y, w, 2);
+  // Fix round 3, item 2: the 2 px accent rule that used to run across
+  // the top of this strip is gone — it read as a stray divider line
+  // under the title, with no function.
   ctx.restore();
 }
 
@@ -256,11 +263,19 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
     } else {
       ctx.drawImage(heroPainted, heroR.x, heroR.y);
     }
-    // Thin neon frame around the hero.
+    // Thin neon frame around the hero — top, left and right only
+    // (fix round 3, item 3): the frame's bottom edge crossed the fade
+    // zone as a hard line exactly where the shoulders melt into the
+    // skyline. Leaving the bottom open lets the photo dissolve.
     ctx.strokeStyle = style.gutter;
     ctx.globalAlpha = 0.85;
     ctx.lineWidth = Math.max(2, W * 0.003);
-    ctx.strokeRect(heroR.x, heroR.y, heroR.w, heroR.h);
+    ctx.beginPath();
+    ctx.moveTo(heroR.x, heroR.y + heroR.h);
+    ctx.lineTo(heroR.x, heroR.y);
+    ctx.lineTo(heroR.x + heroR.w, heroR.y);
+    ctx.lineTo(heroR.x + heroR.w, heroR.y + heroR.h);
+    ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
@@ -375,10 +390,16 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   // on a faint skyline so the bottom is never empty black (fix item 8).
   const fR = R(L.footer);
   if (sizeName === 'portrait') {
-    spMiniSkyline(ctx, fR.x, fR.y, fR.w, fR.h, style.accent);
+    // Fix round 3, item 4: the skyline runs from the footer to the
+    // very bottom of the canvas, so no dead black band is left under
+    // the footer — the footer text sits on the skyline.
+    spMiniSkyline(ctx, fR.x, fR.y, fR.w, H - fR.y, style.accent);
   }
   const fy = fR.y + fR.h / 2;
-  ctx.font = Math.round(Math.max(12, fR.h * 0.32)) + 'px sans-serif';
+  // Bebas Neue for the stars too (fix round 3, item 1: the last
+  // plain `sans-serif` in the renderer — pinned so no text on any
+  // cover can fall back to a generic face a reviewer might misread).
+  ctx.font = Math.round(Math.max(12, fR.h * 0.32)) + 'px "Bebas Neue", sans-serif';
   ctx.fillStyle = '#ffcf4d';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';

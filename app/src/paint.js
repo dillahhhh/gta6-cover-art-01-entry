@@ -185,21 +185,23 @@ function spPaintPhoto(img, rampName, W, H, crop, strength) {
   return work;
 }
 
-/* Full-bleed hero mask (fix round 2): the photo fills the hero to all
- * four edges and fades out vertically — opaque to 40% of the height,
- * gone by 54% — so the subjects' heads and shoulders sit over the
- * sunset and the car hood below never shows. No ellipse, so the hero
- * reads as a poster photo, not an oval sticker. */
+/* Full-bleed hero mask (fix round 2, longer fade in fix round 3,
+ * item 3): the photo fills the hero to all four edges and fades out
+ * vertically — opaque to 40% of the height, gone by 62% — so the
+ * subjects' heads and shoulders sit over the sunset and the car hood
+ * below never shows. The longer fade (was 14% of the height) melts
+ * the photo out instead of stepping across a diagonal shoulder.
+ * No ellipse, so the hero reads as a poster photo, not a sticker. */
 function spHeroMask(w, h) {
   const mask = spCanvas(w, h);
   const ctx = mask.getContext('2d');
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, w, h * 0.40);
-  const fade = ctx.createLinearGradient(0, h * 0.40, 0, h * 0.54);
+  const fade = ctx.createLinearGradient(0, h * 0.40, 0, h * 0.62);
   fade.addColorStop(0, '#fff');
   fade.addColorStop(1, 'rgba(255, 255, 255, 0)');
   ctx.fillStyle = fade;
-  ctx.fillRect(0, h * 0.40, w, h * 0.14);
+  ctx.fillRect(0, h * 0.40, w, h * 0.22);
   return mask;
 }
 
@@ -216,11 +218,13 @@ function spFocusMask(W, H, focus, rx, ry) {
   ctx.translate(cx, cy);
   ctx.scale(rx, ry);
   const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
-  // Fully opaque across 92% of the radius (fix round 2, item 3: the hero
-  // must read as a solid photo, not a fading veil), with only a short
-  // feather at the edge.
+  // Fully opaque across 80% of the radius (fix round 3, item 3: the
+  // old 92% stop left only an 8% feather, which cut a hard step
+  // across the chin where the title breakout dips over the letters),
+  // with a 20% feather at the edge so the breakout melts into the
+  // title instead of slicing across a face.
   grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.92, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.80, 'rgba(255,255,255,1)');
   grad.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = grad;
   ctx.fillRect(-1, -1, 2, 2);
