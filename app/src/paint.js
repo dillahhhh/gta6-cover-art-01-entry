@@ -1,433 +1,252 @@
-'use strict';
-/* SUNSET PRESS — painted photo pipeline.
- *
- * Turns an ordinary photo into flat painted key-art: a soft smoothing pass,
- * a posterized gradient map, a Sobel ink outline, shadow grain and a rim
- * light. Everything runs on plain 2D canvas, no libraries, no network.
- * Also draws the procedural Vice City sunset backdrop (sky, striped sun,
- * cloud bands, neon skyline, palm silhouettes) — all shapes, no images.
- */
+// paint.js — SUNSET PRESS painted-look pipeline (hand-written canvas, no libraries).
+// One photo in, flat "ink and paint" poster art out: smooth, posterize, gradient-map,
+// ink outline, grain, vignette. Plus the procedural Vice City sunset backdrop.
 
-const SP_RAMPS = {
-  sunset: ['#1d0b33', '#5b1a5e', '#c22a6b', '#ff6b4a', '#ffb347', '#ffe9a8'],
-  neon:   ['#050b2e', '#1b2a6b', '#7a2ea6', '#ff2e88', '#ff7ad9', '#b8f6ff'],
-  teal:   ['#041e2b', '#0b4a5e', '#0e8a8a', '#3ec6a7', '#f2d492', '#ffffff'],
-  mono:   ['#12060f', '#3d0f2e', '#8a2a5e', '#e0609e', '#ffb3d1', '#ffffff'],
-  golden: ['#1c0f04', '#5e2f08', '#b25e14', '#ff9a2a', '#ffd98a', '#fff6d8'],
-  vice:   ['#1a0533', '#5b1a8a', '#c22a86', '#ff5e3a', '#ffc93a', '#ffffff'],
+export const PRESETS = {
+  sunset: {
+    label: 'Sunset',
+    levels: 7, strength: 0.52, sat: 1.18, bright: 1.04, warm: 0.10,
+    stops: [[0, 38, 14, 66], [0.28, 122, 32, 96], [0.55, 216, 74, 110], [0.8, 255, 158, 96], [1, 255, 214, 130]],
+  },
+  neon: {
+    label: 'Neon Night',
+    levels: 6, strength: 0.58, sat: 1.28, bright: 1.0, warm: 0.0,
+    stops: [[0, 12, 14, 48], [0.3, 96, 26, 128], [0.58, 178, 58, 158], [0.82, 255, 120, 190], [1, 125, 243, 232]],
+  },
+  teal: {
+    label: 'Teal Dusk',
+    levels: 7, strength: 0.5, sat: 1.12, bright: 1.03, warm: 0.04,
+    stops: [[0, 8, 34, 46], [0.3, 34, 96, 110], [0.58, 64, 142, 138], [0.82, 255, 190, 130], [1, 255, 226, 160]],
+  },
+  mono: {
+    label: 'Mono Pink',
+    levels: 6, strength: 0.55, sat: 0.92, bright: 1.05, warm: 0.06,
+    stops: [[0, 24, 24, 34], [0.32, 96, 52, 84], [0.6, 168, 92, 122], [0.84, 244, 168, 200], [1, 255, 226, 238]],
+  },
 };
 
-/* The 6 poster styles. Each one sets the hero ramp, the four panel
- * treatments (one per supporting panel, in order), the neon accent, the
- * title gradient and which backdrop it paints behind the hero. */
-const SP_STYLES = {
-  sunset: { label: 'Sunset', ramp: 'sunset', panels: ['sunset', 'neon', 'teal', 'mono'],
-            accent: '#ff2e88', gutter: '#ff5e9e', titleTop: '#ffe9a8', titleBottom: '#ff2e88',
-            sub: '#ffd9ec', backdrop: 'sunset' },
-  neon:   { label: 'Neon Night', ramp: 'neon', panels: ['neon', 'vice', 'sunset', 'mono'],
-            accent: '#00e5ff', gutter: '#00e5ff', titleTop: '#b8f6ff', titleBottom: '#ff2e88',
-            sub: '#c8f4ff', backdrop: 'neon' },
-  teal:   { label: 'Teal Dusk', ramp: 'teal', panels: ['teal', 'sunset', 'neon', 'golden'],
-            accent: '#2affd5', gutter: '#2affd5', titleTop: '#ffffff', titleBottom: '#0e8a8a',
-            sub: '#d8fff4', backdrop: 'teal' },
-  mono:   { label: 'Mono Pink', ramp: 'mono', panels: ['mono', 'neon', 'sunset', 'vice'],
-            accent: '#ff7ab8', gutter: '#ff7ab8', titleTop: '#ffffff', titleBottom: '#e0609e',
-            sub: '#ffd3e6', backdrop: 'mono' },
-  golden: { label: 'Golden Hour', ramp: 'golden', panels: ['golden', 'sunset', 'vice', 'teal'],
-            accent: '#ffb300', gutter: '#ffb300', titleTop: '#fff6d8', titleBottom: '#ff9a2a',
-            sub: '#ffe9bf', backdrop: 'golden' },
-  vice:   { label: 'Vice Pop', ramp: 'vice', panels: ['vice', 'neon', 'golden', 'sunset'],
-            accent: '#ffea00', gutter: '#ffea00', titleTop: '#ffffff', titleBottom: '#ff5e3a',
-            sub: '#fff3b0', backdrop: 'vice' },
-};
+function lerp(a, b, t) { return a + (b - a) * t; }
 
-function spCanvas(w, h) {
-  const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.round(w));
-  c.height = Math.max(1, Math.round(h));
-  return c;
-}
-
-function spLoadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('cannot load ' + src));
-    img.src = src;
-  });
-}
-
-/* Hex colour -> [r, g, b]. */
-function spHex(rgb) {
-  return [parseInt(rgb.slice(1, 3), 16), parseInt(rgb.slice(3, 5), 16), parseInt(rgb.slice(5, 7), 16)];
-}
-
-/* Sample a ramp (array of hex stops) at t in [0, 1], linearly. */
-function spRampAt(ramp, t) {
-  const stops = SP_RAMPS[ramp];
-  const x = Math.max(0, Math.min(1, t)) * (stops.length - 1);
-  const i = Math.min(stops.length - 2, Math.floor(x));
-  const f = x - i;
-  const a = spHex(stops[i]);
-  const b = spHex(stops[i + 1]);
-  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
-}
-
-/* Draw img to cover (dx, dy, dw, dh) with a crop transform.
- * crop: {x, y} centre in 0..1 of the source, scale >= 1 zoom, rot radians.
- * The offsets are clamped so the drawn image always covers the rect
- * (fix round 4): a crop that pans past the edge used to leave a dark
- * band at the top of the hero; now the image stops at the edge instead
- * of sliding out of frame. */
-function spCoverDraw(ctx, img, dx, dy, dw, dh, crop) {
-  const iw = img.naturalWidth || img.width;
-  const ih = img.naturalHeight || img.height;
-  const base = Math.max(dw / iw, dh / ih) * (crop.scale || 1);
-  const cx = dx + dw / 2;
-  const cy = dy + dh / 2;
-  ctx.save();
-  ctx.translate(cx, cy);
-  if (crop.rot) ctx.rotate(crop.rot);
-  ctx.translate(-cx, -cy);
-  const sw = iw * base;
-  const sh = ih * base;
-  let ox = cx - sw / 2 + (0.5 - (crop.x ?? 0.5)) * sw * 0.35;
-  let oy = cy - sh / 2 + (0.5 - (crop.y ?? 0.5)) * sh * 0.35;
-  if (sw >= dw) ox = Math.max(dx + dw - sw, Math.min(dx, ox));
-  else ox = dx + (dw - sw) / 2;
-  if (sh >= dh) oy = Math.max(dy + dh - sh, Math.min(dy, oy));
-  else oy = dy + (dh - sh) / 2;
-  ctx.drawImage(img, ox, oy, sw, sh);
-  ctx.restore();
-}
-
-/* Paint a photo: smoothing, a LIGHT posterized gradient map blended back
- * with the original photo (fix round 2, item 4: ~35% paint so faces keep
- * their detail instead of turning into blobs), ink outline, grain, rim
- * light. Returns a canvas of W x H. */
-function spPaintPhoto(img, rampName, W, H, crop, strength) {
-  const s = strength == null ? 0.35 : strength;
-  const work = spCanvas(W, H);
-  const wctx = work.getContext('2d');
-  spCoverDraw(wctx, img, 0, 0, W, H, crop || { x: 0.5, y: 0.5, scale: 1, rot: 0 });
-
-  // 1. Smoothing: a soft blur flattens the photo into paint regions.
-  const soft = spCanvas(W, H);
-  const sctx = soft.getContext('2d');
-  sctx.filter = 'blur(2px)';
-  sctx.drawImage(work, 0, 0);
-  sctx.filter = 'none';
-
-  const src = sctx.getImageData(0, 0, W, H);
-  const d = src.data;
-  // The smoothed original, kept so the painted result can be blended
-  // back toward the photo (item 4): faces keep eyes, mouths, hair.
-  const orig = new Uint8ClampedArray(d);
-  const n = W * H;
-  const lum = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
-    lum[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  }
-
-  // 2. Sobel edges on the luminance, for the ink outline pass.
-  const edge = new Float32Array(n);
-  for (let y = 1; y < H - 1; y++) {
-    for (let x = 1; x < W - 1; x++) {
-      const i = y * W + x;
-      const gx = -lum[i - W - 1] - 2 * lum[i - 1] - lum[i + W - 1]
-               + lum[i - W + 1] + 2 * lum[i + 1] + lum[i + W + 1];
-      const gy = -lum[i - W - 1] - 2 * lum[i - W] - lum[i - W + 1]
-               + lum[i + W - 1] + 2 * lum[i + W] + lum[i + W + 1];
-      edge[i] = Math.sqrt(gx * gx + gy * gy);
+function mapStops(stops, t) {
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i + 1];
+    if (t <= b[0]) {
+      const k = b[0] === a[0] ? 0 : (t - a[0]) / (b[0] - a[0]);
+      return [lerp(a[1], b[1], k), lerp(a[2], b[2], k), lerp(a[3], b[3], k)];
     }
   }
+  const last = stops[stops.length - 1];
+  return [last[1], last[2], last[3]];
+}
 
-  // 3. Posterize to 9 levels (item 4: 8+ levels keeps facial detail),
-  // map through the ramp, ink the edges, grain the shadows, then blend
-  // the painted result back toward the original photo at strength s.
-  const levels = 9;
-  for (let i = 0; i < n; i++) {
-    const l = lum[i];
-    const q = Math.floor(l * levels) / levels; // posterized level
-    const c = spRampAt(rampName, q);
-    let r = c[0], g = c[1], b = c[2];
-    const e = edge[i];
-    if (e > 0.28) { // ink outline: pull strong edges toward near-black
-      const k = Math.min(1, (e - 0.28) * 3.2) * 0.85 * s;
-      r = r * (1 - k) + 16 * k;
-      g = g * (1 - k) + 5 * k;
-      b = b * (1 - k) + 16 * k;
+// Cheap two-pass box blur through a half-size canvas: flattens photo detail into paint regions.
+function smoothStep(src, w, h, scale) {
+  const sw = Math.max(2, Math.round(w * scale));
+  const sh = Math.max(2, Math.round(h * scale));
+  const small = document.createElement('canvas');
+  small.width = sw; small.height = sh;
+  const sctx = small.getContext('2d');
+  sctx.imageSmoothingEnabled = true;
+  sctx.imageSmoothingQuality = 'high';
+  sctx.drawImage(src, 0, 0, sw, sh);
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const octx = out.getContext('2d');
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = 'high';
+  octx.drawImage(small, 0, 0, w, h);
+  return out;
+}
+
+function luminance(r, g, b) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
+
+// Sobel edge strength on a small luminance grid; returns a 0..1 Float32Array.
+function edgeField(img, w, h) {
+  const d = img.data;
+  const lum = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) lum[i] = luminance(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) / 255;
+  const out = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const gx = -lum[i - w - 1] - 2 * lum[i - 1] - lum[i + w - 1] + lum[i - w + 1] + 2 * lum[i + 1] + lum[i + w + 1];
+      const gy = -lum[i - w - 1] - 2 * lum[i - w] - lum[i - w + 1] + lum[i + w - 1] + 2 * lum[i + w] + lum[i + w + 1];
+      out[i] = Math.min(1, Math.sqrt(gx * gx + gy * gy) * 0.9);
     }
-    if (l < 0.38) { // halftone-ish grain in the shadows only
-      const nz = (Math.sin(i * 12.9898) * 43758.5453 % 1) * 21 - 10.5;
-      r += nz; g += nz; b += nz;
-    }
-    if (rampName === 'golden' && l > 0.45 && l < 0.85) {
-      // Skin lives in this band: pull ~15% of the yellow warmth out so
-      // faces stay human under the golden grade (fix round, item 9).
-      // The sky keeps its gold — it comes from the backdrop, not this ramp.
-      // Fix round 5, item 5: the pull applies ONLY when the ORIGINAL
-      // pixel is warm (skin-like). The old blanket pull also greyed
-      // the sea and foliage — THE SHORE's water went grey-green mud.
-      // Cool/greenish originals (sea, foliage) keep the full amber
-      // paint and get warmed again after the blend, below.
-      const or = orig[i * 4], og = orig[i * 4 + 1], ob = orig[i * 4 + 2];
-      if (or >= og && og >= ob) {
-        const avg = (r + g + b) / 3;
-        r = r * 0.85 + avg * 0.15;
-        g = g * 0.85 + avg * 0.15;
-        b = b * 0.85 + avg * 0.15;
+  }
+  return out;
+}
+
+// Paint a photo (Image/Canvas) into a fresh canvas at w x h with a preset.
+// strength 0 = the plain photo, 1 = fully painted.
+export function paintPhoto(source, w, h, presetName, strength = 0.5) {
+  const preset = PRESETS[presetName] || PRESETS.sunset;
+  const s = strength == null ? preset.strength : strength;
+  const base = document.createElement('canvas');
+  base.width = w; base.height = h;
+  const bctx = base.getContext('2d');
+  bctx.drawImage(source, 0, 0, w, h);
+
+  // Flatten detail: two smoothing rounds at half and 0.7 scale.
+  let flat = smoothStep(base, w, h, 0.5);
+  flat = smoothStep(flat, w, h, 0.72);
+
+  const fctx = flat.getContext('2d');
+  const img = fctx.getImageData(0, 0, w, h);
+  const d = img.data;
+
+  // Edge field at quarter size for speed.
+  const ew = Math.max(2, Math.round(w / 4));
+  const eh = Math.max(2, Math.round(h / 4));
+  const edgeSmall = document.createElement('canvas');
+  edgeSmall.width = ew; edgeSmall.height = eh;
+  edgeSmall.getContext('2d').drawImage(flat, 0, 0, ew, eh);
+  const edgeImg = edgeSmall.getContext('2d').getImageData(0, 0, ew, eh);
+  const edges = edgeField(edgeImg, ew, eh);
+
+  const levels = preset.levels;
+  const sat = preset.sat, bright = preset.bright, warm = preset.warm;
+  // Deterministic grain: a tiny hash per pixel, no Math.random in the loop.
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
+      const lum = luminance(r0, g0, b0) / 255;
+      // Posterize the luminance into flat paint levels.
+      const q = Math.min(levels - 1, Math.floor(lum * levels)) / (levels - 1);
+      const [mr, mg, mb] = mapStops(preset.stops, q);
+      // Painted colour = gradient-mapped, blended toward the photo by (1 - s).
+      let r = mr * s + r0 * (1 - s);
+      let g = mg * s + g0 * (1 - s);
+      let b = mb * s + b0 * (1 - s);
+      // Saturation + brightness + a touch of warmth.
+      const l2 = luminance(r, g, b);
+      r = l2 + (r - l2) * sat;
+      g = l2 + (g - l2) * sat;
+      b = l2 + (b - l2) * sat;
+      r = r * bright + warm * 14;
+      g = g * bright;
+      b = b * bright - warm * 8;
+      // Ink outline: darken where the edge field is strong (sampled from quarter size).
+      const ex = Math.min(ew - 1, (x * ew / w) | 0);
+      const ey = Math.min(eh - 1, (y * eh / h) | 0);
+      const e = edges[ey * ew + ex];
+      if (e > 0.28) {
+        const ink = Math.min(1, (e - 0.28) * 2.2) * 0.55;
+        r *= 1 - ink; g *= 1 - ink; b *= 1 - ink;
       }
+      // Grain, stronger in the shadows.
+      const hash = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+      const n = (hash - Math.floor(hash) - 0.5) * 16 * (1 - lum * 0.6);
+      r += n; g += n; b += n;
+      // Vignette: darken the corners gently.
+      const nx = (x / w - 0.5) * 2, ny = (y / h - 0.5) * 2;
+      const v = 1 - 0.22 * Math.max(0, nx * nx + ny * ny - 0.55);
+      d[i] = Math.max(0, Math.min(255, r * v));
+      d[i + 1] = Math.max(0, Math.min(255, g * v));
+      d[i + 2] = Math.max(0, Math.min(255, b * v));
     }
-    // Blend: s of paint, (1 - s) of the smoothed original photo, so the
-    // result reads as a light painting over a real face, not a blob.
-    const m = s;
-    let fr = r * m + orig[i * 4] * (1 - m);
-    let fg = g * m + orig[i * 4 + 1] * (1 - m);
-    let fb = b * m + orig[i * 4 + 2] * (1 - m);
-    if (rampName === 'golden' && l > 0.45 && l < 0.85) {
-      // Fix round 5, item 5 (continued): the blend keeps 53% of the
-      // original, so a grey-green sea stays grey-green even with amber
-      // paint. Warm the BLENDED result toward amber/peach when the
-      // original pixel is cool/greenish — the sea turns amber instead
-      // of mud, while warm skin above is untouched.
-      const or = orig[i * 4], og = orig[i * 4 + 1], ob = orig[i * 4 + 2];
-      if (!(or >= og && og >= ob)) {
-        fr = Math.min(255, fr * 1.10 + 8);
-        fb = fb * 0.88;
-      }
-    }
-    d[i * 4] = Math.max(0, Math.min(255, fr));
-    d[i * 4 + 1] = Math.max(0, Math.min(255, fg));
-    d[i * 4 + 2] = Math.max(0, Math.min(255, fb));
   }
-  wctx.putImageData(src, 0, 0);
-
-  // 4. Rim light: a soft warm wash from the upper-right (sun side).
-  const rim = wctx.createLinearGradient(W, 0, 0, H);
-  rim.addColorStop(0, 'rgba(255, 214, 140, 0.20)');
-  rim.addColorStop(0.55, 'rgba(255, 214, 140, 0)');
-  rim.addColorStop(1, 'rgba(20, 6, 40, 0.10)');
-  wctx.globalCompositeOperation = 'screen';
-  wctx.fillStyle = rim;
-  wctx.fillRect(0, 0, W, H);
-  wctx.globalCompositeOperation = 'source-over';
-  return work;
+  fctx.putImageData(img, 0, 0);
+  return flat;
 }
 
-/* Light unsharp mask (fix round 5, item 3): out = orig + amount *
- * (orig - blur(radius)). Applied in place; the 4:5 hero upscales the
- * square sample ~1.25x, so faces and background go soft without it.
- * Keep it light (0.4 / 1.2 px) — a poster, not a sharpened photo. */
-function spUnsharp(canvas, amount, radius) {
-  const W = canvas.width;
-  const H = canvas.height;
-  const blurred = spCanvas(W, H);
-  const bctx = blurred.getContext('2d');
-  bctx.filter = 'blur(' + radius + 'px)';
+// Light unsharp mask: original + amount * (original - blurred).
+export function unsharp(canvas, amount, radiusPx) {
+  const w = canvas.width, h = canvas.height;
+  const blur = document.createElement('canvas');
+  blur.width = w; blur.height = h;
+  const bctx = blur.getContext('2d');
+  bctx.filter = `blur(${radiusPx}px)`;
   bctx.drawImage(canvas, 0, 0);
-  bctx.filter = 'none';
-  const ctx = canvas.getContext('2d');
-  const orig = ctx.getImageData(0, 0, W, H);
-  const blur = bctx.getImageData(0, 0, W, H);
-  const d = orig.data;
-  const b = blur.data;
-  for (let i = 0; i < d.length; i += 4) {
-    d[i] = Math.max(0, Math.min(255, d[i] + amount * (d[i] - b[i])));
-    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + amount * (d[i + 1] - b[i + 1])));
-    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + amount * (d[i + 2] - b[i + 2])));
+  const cctx = canvas.getContext('2d');
+  const a = cctx.getImageData(0, 0, w, h);
+  const b = bctx.getImageData(0, 0, w, h);
+  const da = a.data, db = b.data;
+  for (let i = 0; i < da.length; i += 4) {
+    da[i] = Math.max(0, Math.min(255, da[i] + (da[i] - db[i]) * amount));
+    da[i + 1] = Math.max(0, Math.min(255, da[i + 1] + (da[i + 1] - db[i + 1]) * amount));
+    da[i + 2] = Math.max(0, Math.min(255, da[i + 2] + (da[i + 2] - db[i + 2]) * amount));
   }
-  ctx.putImageData(orig, 0, 0);
+  cctx.putImageData(a, 0, 0);
   return canvas;
 }
 
-/* Full-bleed hero mask (fix round 2, longer fade in fix round 3,
- * item 3): the photo fills the hero to all four edges and fades out
- * vertically — opaque to 40% of the height, gone by 62% — so the
- * subjects' heads and shoulders sit over the sunset and the car hood
- * below never shows. The longer fade (was 14% of the height) melts
- * the photo out instead of stepping across a diagonal shoulder.
- * No ellipse, so the hero reads as a poster photo, not a sticker. */
-function spHeroMask(w, h) {
-  const mask = spCanvas(w, h);
-  const ctx = mask.getContext('2d');
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, w, h * 0.40);
-  const fade = ctx.createLinearGradient(0, h * 0.40, 0, h * 0.62);
-  fade.addColorStop(0, '#fff');
-  fade.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  ctx.fillStyle = fade;
-  ctx.fillRect(0, h * 0.40, w, h * 0.22);
-  return mask;
-}
-
-/* Seeded pseudo-random, so the backdrop is identical on every render. */
-function spRand(seed) {
-  let t = seed >>> 0;
-  return function () {
-    t = (t * 1664525 + 1013904223) >>> 0;
-    return t / 4294967296;
-  };
-}
-
-function spPalm(ctx, x, y, s, lean, colour) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(lean);
-  ctx.scale(s, s);
-  ctx.strokeStyle = colour;
-  ctx.fillStyle = colour;
-  ctx.lineCap = 'round';
-  // Trunk: a tapering curve.
-  ctx.beginPath();
-  ctx.moveTo(-4, 0);
-  ctx.quadraticCurveTo(-2, -60, 4, -96);
-  ctx.lineTo(10, -96);
-  ctx.quadraticCurveTo(4, -58, 6, 0);
-  ctx.closePath();
-  ctx.fill();
-  // Fronds: arcs drooping from the crown.
-  ctx.lineWidth = 5;
-  for (let i = 0; i < 7; i++) {
-    const a = Math.PI * (0.08 + i * 0.14);
-    const ex = Math.cos(a) * 62 * (i % 2 ? 1 : -1);
-    const ey = -96 - Math.sin(a) * 26 - 8;
-    ctx.beginPath();
-    ctx.moveTo(6, -96);
-    ctx.quadraticCurveTo(ex * 0.55, -96 - 26, ex, ey + 22);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-/* Face zone per sample photo (fix round 2, item 5; selfie corrected
- * fix round 4, item 3): the vertical centre of the faces, as a fraction
- * of the photo height, so panel crops frame faces instead of cutting
- * heads. The selfie-day face is LOW in its tall frame — forehead
- * ~0.28, eyes ~0.42, nose ~0.50, mouth ~0.60 — so its zone is 0.53,
- * not 0.22: the old value centred the panel window on the wall above
- * the face and cut the mouth off. */
-const SP_FACE_Y = {
-  'samples/hero-real.jpg': 0.45,
-  'samples/selfie-day.jpg': 0.53,
-  'samples/friends-day.jpg': 0.10,
-  'samples/group-night.jpg': 0.22,
-  'samples/heist-duo.jpg': 0.30,
-  'samples/beach-night.jpg': 0.5,
-  'samples/getaway.jpg': 0.3,
-  'samples/hotel-night.jpg': 0.4,
-  'samples/neon-street.jpg': 0.4,
-  'samples/palm-beach.jpg': 0.5,
-};
-function spFaceY(src) {
-  return SP_FACE_Y[src] == null ? 0.35 : SP_FACE_Y[src];
-}
-
-/* (fix round 2, item 2: the painted-sky brushwork is gone — its bands
- * read as glitch stripes on the hero. The sky stays a clean gradient
- * with faint clouds and uniform fine grain from the final grade.) */
-
-/* Procedural Vice City sunset: banded sky, striped sun, cloud bands,
- * art-deco neon skyline, palm silhouettes. Drawn into (x, y, w, h). */
-function spDrawBackdrop(ctx, x, y, w, h, presetName) {
-  const ramp = SP_RAMPS[presetName] || SP_RAMPS.sunset;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  const sky = ctx.createLinearGradient(0, y, 0, y + h);
-  sky.addColorStop(0, ramp[0]);
-  sky.addColorStop(0.45, ramp[1]);
-  sky.addColorStop(0.72, ramp[2]);
-  sky.addColorStop(0.92, ramp[3]);
-  sky.addColorStop(1, ramp[4]);
+// Procedural Vice City sunset backdrop: sun disc, banded clouds, palm silhouettes, skyline.
+// Drawn once per cover when the Sunset Backdrop toggle is on (default off).
+export function drawSunsetBackdrop(ctx, w, h) {
+  const sky = ctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, '#2b1150');
+  sky.addColorStop(0.42, '#a83a7c');
+  sky.addColorStop(0.68, '#ff7a59');
+  sky.addColorStop(1, '#ffc46b');
   ctx.fillStyle = sky;
-  ctx.fillRect(x, y, w, h);
-
-  // Striped sun LOW over the skyline (fix round 2, item 3): a high sun
-  // sat on the hero's forehead. Down here it reads as a setting sun
-  // over the city and can never touch a face.
-  const sunR = h * 0.13;
-  const sunX = x + w * 0.85;
-  const sunY = y + h * 0.70;
-  const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 2.2);
-  glow.addColorStop(0, 'rgba(255, 214, 140, 0.35)');
-  glow.addColorStop(1, 'rgba(255, 214, 140, 0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(sunX - sunR * 2.6, sunY - sunR * 2.6, sunR * 5.2, sunR * 5.2);
-  ctx.save();
+  ctx.fillRect(0, 0, w, h);
+  // Sun disc with a soft halo.
+  const sx = w * 0.68, sy = h * 0.42, sr = Math.min(w, h) * 0.16;
+  const halo = ctx.createRadialGradient(sx, sy, sr * 0.2, sx, sy, sr * 2.4);
+  halo.addColorStop(0, 'rgba(255, 236, 170, 0.85)');
+  halo.addColorStop(1, 'rgba(255, 236, 170, 0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#ffe9a8';
   ctx.beginPath();
-  ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
-  ctx.clip();
-  const disc = ctx.createLinearGradient(0, sunY - sunR, 0, sunY + sunR);
-  disc.addColorStop(0, '#fff6d8');
-  disc.addColorStop(0.55, '#ffb347');
-  disc.addColorStop(1, '#ff5e3a');
-  ctx.fillStyle = disc;
-  ctx.fillRect(sunX - sunR, sunY - sunR, sunR * 2, sunR * 2);
-  // Retro stripes cut across the lower half of the disc.
-  ctx.fillStyle = ramp[1];
-  let sy = sunY + sunR * 0.05;
-  let th = sunR * 0.05;
-  while (sy < sunY + sunR) {
-    ctx.fillRect(sunX - sunR, sy, sunR * 2, th);
-    sy += th * 2.4;
-    th *= 1.25;
-  }
-  ctx.restore();
-
-  // Cloud bands: faint now (fix round 2, item 2 — the old 0.20 ellipses
-  // read as fog). Five soft clouds, no stripes.
-  const rnd = spRand(20261121);
-  ctx.fillStyle = 'rgba(255, 170, 190, 0.10)';
+  ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+  ctx.fill();
+  // Banded clouds: a few soft horizontal bars.
+  ctx.fillStyle = 'rgba(255, 150, 120, 0.35)';
   for (let i = 0; i < 5; i++) {
-    const cw = w * (0.22 + rnd() * 0.3);
-    const cx = x + rnd() * w;
-    const cy = y + h * (0.10 + rnd() * 0.42);
+    const cy = h * (0.16 + i * 0.09);
+    const cw = w * (0.5 + ((i * 37) % 30) / 100);
+    const cx = w * (((i * 53) % 40) / 100);
     ctx.beginPath();
-    ctx.ellipse(cx, cy, cw / 2, h * 0.018, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx + cw / 2, cy, cw / 2, h * 0.018, 0, 0, Math.PI * 2);
     ctx.fill();
   }
-
-  // Art-deco skyline with neon windows, low so it frames the subject
-  // instead of cutting across it.
-  const base = y + h * 0.90;
-  const dark = ramp[0];
-  let bx = x;
-  const rnd2 = spRand(77);
-  while (bx < x + w) {
-    const bw = w * (0.05 + rnd2() * 0.07);
-    // Taller skyline (fix round 2, item 1): with the hero photo ending
-    // at the subjects' chests, the lower hero is city, not empty sky.
-    const bh = h * (0.10 + rnd2() * 0.16);
-    const deco = rnd2() > 0.6;
-    ctx.fillStyle = dark;
-    ctx.fillRect(bx, base - bh, bw, bh);
-    if (deco) {
-      ctx.fillRect(bx + bw * 0.25, base - bh - h * 0.04, bw * 0.5, h * 0.04);
-      ctx.fillRect(bx + bw * 0.38, base - bh - h * 0.07, bw * 0.24, h * 0.03);
-    }
-    // Neon windows.
-    const winCols = ['#ff2e88', '#00e5ff', '#ffea00', '#ff9a2a'];
-    for (let wy = base - bh + 6; wy < base - 8; wy += 12) {
-      for (let wx = bx + 5; wx < bx + bw - 6; wx += 11) {
-        if (rnd2() > 0.45) {
-          ctx.fillStyle = winCols[Math.floor(rnd2() * winCols.length)];
-          ctx.globalAlpha = 0.75;
-          ctx.fillRect(wx, wy, 4, 6);
-          ctx.globalAlpha = 1;
-        }
-      }
-    }
-    bx += bw + 2;
+  // Art-deco skyline along the bottom.
+  ctx.fillStyle = '#241033';
+  let bx = 0;
+  let seed = 7;
+  while (bx < w) {
+    seed = (seed * 37 + 11) % 97;
+    const bw = w * (0.05 + (seed % 9) / 100);
+    const bh = h * (0.10 + (seed % 13) / 100);
+    ctx.fillRect(bx, h - bh, bw, bh);
+    // Neon roof line.
+    ctx.fillStyle = '#ff5fa2';
+    ctx.fillRect(bx, h - bh, bw, Math.max(2, h * 0.004));
+    ctx.fillStyle = '#241033';
+    bx += bw + w * 0.008;
   }
-  // Neon horizon line.
-  ctx.fillStyle = 'rgba(255, 46, 136, 0.8)';
-  ctx.fillRect(x, base, w, 2);
+  // Two palm silhouettes.
+  drawPalm(ctx, w * 0.08, h * 0.98, h * 0.34, '#1c0b2e');
+  drawPalm(ctx, w * 0.94, h * 0.99, h * 0.28, '#1c0b2e');
+}
 
-  // Palm silhouettes, small and soft, at the corners only.
-  spPalm(ctx, x + w * 0.06, base + h * 0.06, h / 430, -0.12, ramp[1]);
-  spPalm(ctx, x + w * 0.95, base + h * 0.06, h / 480, 0.14, ramp[1]);
-  ctx.restore();
+function drawPalm(ctx, x, y, size, color) {
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(3, size * 0.03);
+  ctx.lineCap = 'round';
+  // Trunk: a gentle curve.
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.quadraticCurveTo(x + size * 0.06, y - size * 0.55, x - size * 0.04, y - size);
+  ctx.stroke();
+  // Fronds: seven arcs fanning from the crown.
+  const cx = x - size * 0.04, cy = y - size;
+  for (let i = 0; i < 7; i++) {
+    const a = Math.PI * (0.08 + (i / 6) * 0.84);
+    const tx = cx + Math.cos(a) * size * 0.42;
+    const ty = cy + Math.sin(a) * size * 0.22 - size * 0.1;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.quadraticCurveTo(cx + Math.cos(a) * size * 0.22, cy - size * 0.16, tx, ty);
+    ctx.stroke();
+  }
+  // Coconuts.
+  ctx.beginPath();
+  ctx.arc(cx - size * 0.02, cy + size * 0.03, size * 0.035, 0, Math.PI * 2);
+  ctx.arc(cx + size * 0.03, cy + size * 0.04, size * 0.03, 0, Math.PI * 2);
+  ctx.fill();
 }

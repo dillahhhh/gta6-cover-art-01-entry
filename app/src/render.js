@@ -1,527 +1,449 @@
-'use strict';
-/* SUNSET PRESS — poster renderer.
- *
- * Layout engine for the three export sizes, the hero + supporting-cast
- * composition, the hero breakout over the title, the 3D lettering engine,
- * pill labels, poster furniture and the final unified grade. All drawing is
- * plain 2D canvas; the painted panels come from paint.js.
- */
+// render.js — SUNSET PRESS cover engine: layout, hero framing, panels, lettering, export.
+// One photo in, a multi-panel GTA-style poster out, in 1080x1080, 1080x1350 and 1920x1080.
+import { paintPhoto, unsharp, drawSunsetBackdrop, PRESETS } from './paint.js';
 
-const SP_SIZES = {
-  square: { w: 1080, h: 1080 },
-  portrait: { w: 1080, h: 1350 },
-  wide: { w: 1920, h: 1080 },
+export const SIZES = {
+  square: { w: 1080, h: 1080, label: 'Square 1080 × 1080' },
+  portrait: { w: 1080, h: 1350, label: 'Portrait 1080 × 1350' },
+  wide: { w: 1920, h: 1080, label: 'Wide 1920 × 1080' },
 };
 
-/* Fractional layout per size: supporting rects, title band, footer.
- * The hero is the whole poster now (fix round 4, item 2): one full-bleed
- * photo, top to bottom, painted over the full canvas — no hero column,
- * no skyline band splitting it. The title, tagline and footer sit ON the
- * photo over a dark bottom gradient, and the three supporting panels
- * float on the photo's right side. Fractions of (W, H).
- *
- * Fix round 5, item 1: the panel stack is NARROW (~27% of the width)
- * and starts clear of the hero subject's face. The sample couple
- * spans photo x 0.34–0.69; with a centred hero crop the man's face
- * lands at canvas x ~0.89 (square) and ~0.99 (portrait) — under the
- * old 0.645/0.575 stacks, which is why only his sunglasses showed.
- * Square panels start at 0.73, wide at 0.72, portrait at 0.80 (the
- * portrait hero is also reframed — see SP_HERO_FRAME — so 0.80
- * clears it; the narrow portrait window cannot fit both faces left
- * of a 0.73 stack at any zoom that still covers the canvas).
- * `flip` mirrors the stack to the LEFT when the
- * subject focus sits right of centre (focus.x > 0.5): the subject
- * is never covered, whatever photo is loaded.
- *
- * Fix round 8: per-size title height. `titleDY` moves the title band
- * (and the footer riding with it) down by a fraction of the canvas
- * height, + = down, so the wordmark can clear a low face — the
- * real-photo hero's front face sits low, and the fixed bands put the
- * wordmark across his mouth in square and his eyes in portrait. The
- * footer rides with the title so the tagline never lands on it, and
- * is clamped to keep the footer band inside the canvas. */
-/* Fix round 9: panel side control. `panelsSide` is 'auto' (default),
- * 'left', 'right' or 'off'. Auto keeps the focus rule (flip left when
- * the subject focus sits right of centre, so the subject is never
- * covered). Explicit left/right force that side — for photos with
- * faces on both sides, where the focus rule picks the wrong one — and
- * off drops the panel stack entirely. Returns {flip, off}. */
-function spResolvePanels(state) {
-  const side = (state && state.panelsSide) || 'auto';
-  if (side === 'off') return { flip: false, off: true };
-  if (side === 'left') return { flip: true, off: false };
-  if (side === 'right') return { flip: false, off: false };
-  return { flip: !!(state.focus && state.focus.x > 0.5), off: false };
+// Sample photos bundled under app/samples/. focus = where the faces are (fractions of the photo).
+// frame = per-size reframing that keeps faces clear of the panels and the title:
+//   fx/fy override the focus point for that size; zoom > 1 crops tighter around it.
+export const PHOTOS = {
+  'hero-real.jpg': {
+    label: 'Lakeside duo (real photo)', focus: { x: 0.6, y: 0.45 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.44 },
+      wide: { zoom: 1.1, fx: 0.63, fy: 0.5 },
+      portrait: { zoom: 1, fx: 0.6, fy: 0.5 },
+    },
+  },
+  'heist-duo.jpg': {
+    label: 'Heist duo (illustration)', focus: { x: 0.42, y: 0.2 },
+    frame: {
+      square: { zoom: 1, fx: 0.566, fy: 0.5 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.35 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.3 },
+    },
+  },
+  'group-night.jpg': {
+    label: 'Group night', focus: { x: 0.5, y: 0.42 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.42 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.42 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.42 },
+    },
+  },
+  'friends-day.jpg': {
+    label: 'Friends day', focus: { x: 0.5, y: 0.4 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.4 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.4 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.4 },
+    },
+  },
+  'getaway.jpg': {
+    label: 'The getaway', focus: { x: 0.5, y: 0.5 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.5 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.5 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.5 },
+    },
+  },
+  'beach-night.jpg': {
+    label: 'Beach night', focus: { x: 0.5, y: 0.5 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.5 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.5 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.5 },
+    },
+  },
+  'hotel-night.jpg': {
+    label: 'Hotel night', focus: { x: 0.5, y: 0.45 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.45 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.45 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.45 },
+    },
+  },
+  'palm-beach.jpg': {
+    label: 'Palm beach', focus: { x: 0.5, y: 0.45 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.45 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.45 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.45 },
+    },
+  },
+  'neon-street.jpg': {
+    label: 'Neon street', focus: { x: 0.5, y: 0.45 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.45 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.45 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.45 },
+    },
+  },
+  'selfie-day.jpg': {
+    label: 'Selfie day', focus: { x: 0.5, y: 0.3 },
+    frame: {
+      square: { zoom: 1, fx: 0.5, fy: 0.3 },
+      wide: { zoom: 1, fx: 0.5, fy: 0.3 },
+      portrait: { zoom: 1, fx: 0.5, fy: 0.3 },
+    },
+  },
+};
+
+// The three supporting panels: label, photo, paint preset. Labels are brightened (+20%)
+// so they stay readable at thumbnail size.
+export const PANEL_DEFS = [
+  { label: 'THE CREW', photo: 'friends-day.jpg', preset: 'neon' },
+  { label: 'THE GETAWAY', photo: 'getaway.jpg', preset: 'sunset' },
+  { label: 'THE SCORE', photo: 'beach-night.jpg', preset: 'teal' },
+];
+
+export const DEFAULT_STATE = {
+  photo: 'hero-real.jpg',
+  preset: 'sunset',
+  title: 'SUNSET HEIST',
+  kicker: 'ONE LAST JOB.',
+  subtitle: 'VICE CITY · TONIGHT',
+  footer: 'SUNSET PRESS',
+  panels: 'auto', // auto | left | right | off
+  backdrop: false,
+  titleLift: 0, // -100..100, shifts the title band up/down
+  size: 'square',
+  zoom: 1,
+  focus: null, // null = the photo's built-in focus point
+};
+
+const imageCache = new Map();
+export function loadImage(src) {
+  if (!imageCache.has(src)) {
+    imageCache.set(src, new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('cannot load ' + src));
+      img.src = src;
+    }));
+  }
+  return imageCache.get(src);
 }
 
-function spLayoutFor(sizeName, flip, titleDY, noPanels) {
-  // (fix round 2, item 8: the portrait band was too tall — the tagline
-  // sat ~200 px above the footer with dead air between them. The band
-  // is shorter now and the footer rides up to meet it.)
-  let layout;
-  if (sizeName === 'portrait') {
-    layout = {
-      hero: { x: 0, y: 0, w: 1, h: 1 },
-      supports: [
-        { x: 0.80, y: 0, w: 0.20, h: 0.16 },
-        { x: 0.80, y: 0.185, w: 0.20, h: 0.16 },
-        { x: 0.80, y: 0.37, w: 0.20, h: 0.16 },
-      ],
-      title: { x: 0, y: 0.545, w: 1, h: 0.22 },
-      // Fix round 3, item 4: the footer rides up to meet the title
-      // band (was 0.80), so the dark strip between them is gone.
-      footer: { x: 0, y: 0.77, w: 1, h: 0.09 },
-    };
-  } else if (sizeName === 'wide') {
-    layout = {
-      hero: { x: 0, y: 0, w: 1, h: 1 },
-      supports: [
-        { x: 0.72, y: 0, w: 0.28, h: 0.22 },
-        { x: 0.72, y: 0.24, w: 0.28, h: 0.22 },
-        { x: 0.72, y: 0.48, w: 0.28, h: 0.22 },
-      ],
-      // Fix round 4, item 5: the title band is taller (was 0.715 /
-      // 0.20) so the grown 16:9 wordmark (≥55% of the canvas) fits
-      // with its extrusion clear of the tagline.
-      title: { x: 0, y: 0.70, w: 1, h: 0.24 },
-      // Fix round 3, item 4: the footer meets the title band (was
-      // 0.93), so the dark strip under the title on the right is gone.
-      footer: { x: 0, y: 0.94, w: 1, h: 0.06 },
-    };
-  } else {
-    layout = {
-      hero: { x: 0, y: 0, w: 1, h: 1 },
-      supports: [
-        { x: 0.73, y: 0, w: 0.27, h: 0.18 },
-        { x: 0.73, y: 0.205, w: 0.27, h: 0.20 },
-        { x: 0.73, y: 0.43, w: 0.27, h: 0.20 },
-      ],
-      title: { x: 0, y: 0.665, w: 1, h: 0.24 },
-      footer: { x: 0, y: 0.915, w: 1, h: 0.085 },
-    };
-  }
-  const dy = titleDY || 0;
-  if (dy) {
-    layout.title.y += dy;
-    layout.footer.y = Math.min(1 - layout.footer.h, layout.footer.y + dy);
-  }
-  if (noPanels) {
-    layout.supports = [];
-  } else if (flip) {
-    layout.supports = layout.supports.map((f) => ({ ...f, x: 1 - f.x - f.w }));
-  }
-  return layout;
+export async function waitForFonts() {
+  try {
+    await Promise.all([
+      document.fonts.load('100px Anton'),
+      document.fonts.load('100px "Bebas Neue"'),
+      document.fonts.load('16px "Bebas Neue"'),
+    ]);
+    await document.fonts.ready;
+  } catch { /* fonts fall back to sans-serif; the cover still renders */ }
 }
 
-function spRoundRect(ctx, x, y, w, h, r) {
+// Cover-fit source window for an image of iw x ih drawn into a cw x ch rect,
+// centred on (fx, fy) with a zoom. Returns photo-pixel {sx, sy, sw, sh}, clamped.
+export function coverWindow(iw, ih, cw, ch, fx, fy, zoom) {
+  const scale = Math.max(cw / iw, ch / ih) * (zoom || 1);
+  let sw = cw / scale;
+  let sh = ch / scale;
+  if (sw > iw) { sw = iw; sh = sw * (ch / cw); }
+  if (sh > ih) { sh = ih; sw = sh * (cw / ch); }
+  let sx = fx * iw - sw / 2;
+  let sy = fy * ih - sh / 2;
+  sx = Math.max(0, Math.min(iw - sw, sx));
+  sy = Math.max(0, Math.min(ih - sh, sy));
+  return { sx, sy, sw, sh };
+}
+
+// Which side the panel stack goes on. Auto puts it opposite the faces; when the
+// faces sit in the middle (group shots) it turns the panels off instead of covering one.
+export function resolvePanels(state) {
+  if (state.panels === 'off') return null;
+  if (state.panels === 'left') return 'left';
+  if (state.panels === 'right') return 'right';
+  const meta = PHOTOS[state.photo] || PHOTOS['hero-real.jpg'];
+  const fx = (state.focus && state.focus.x) ?? meta.focus.x;
+  if (fx > 0.55) return 'left';
+  if (fx < 0.45) return 'right';
+  return null;
+}
+
+// Layout numbers for one size. All fractions of the canvas.
+export function layoutFor(sizeName, panelsSide) {
+  const { w, h } = SIZES[sizeName];
+  const panelFrac = sizeName === 'square' ? 0.27 : sizeName === 'wide' ? 0.28 : 0.2;
+  const titleY = sizeName === 'square' ? 0.7 : sizeName === 'wide' ? 0.78 : 0.815;
+  const titleFill = sizeName === 'square' ? 0.72 : sizeName === 'wide' ? 0.5 : 0.86;
+  return {
+    w, h,
+    panelW: panelsSide ? Math.round(w * panelFrac) : 0,
+    side: panelsSide,
+    titleY, titleFill,
+    gutter: Math.max(4, Math.round(w * 0.005)),
+    labelH: Math.max(18, Math.round(h * 0.026)),
+  };
+}
+
+function fitFont(ctx, text, fontFamily, maxWidth, startPx) {
+  let px = startPx;
+  ctx.font = `${px}px ${fontFamily}`;
+  while (px > 24 && ctx.measureText(text).width > maxWidth) {
+    px = Math.max(24, Math.round(px * 0.94));
+    ctx.font = `${px}px ${fontFamily}`;
+  }
+  return px;
+}
+
+// The big wordmark: gold-to-pink gradient, three-layer hard extrusion, dark outline,
+// neon glow, thin white top highlight.
+function drawTitle(ctx, text, cx, topY, maxWidth, canvasW) {
+  const startPx = Math.round(canvasW * 0.17);
+  const px = fitFont(ctx, text, 'Anton, "Arial Narrow", sans-serif', maxWidth, startPx);
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  // Neon glow.
+  ctx.shadowColor = 'rgba(255, 95, 162, 0.85)';
+  ctx.shadowBlur = Math.round(px * 0.16);
+  ctx.font = `${px}px Anton, "Arial Narrow", sans-serif`;
+  ctx.fillStyle = '#ffd166';
+  ctx.fillText(text, cx, topY);
+  ctx.shadowBlur = 0;
+  // Hard extrusion, three layers down-right.
+  const layers = ['#3a0a2e', '#2a0830', '#1c0626'];
+  layers.forEach((color, i) => {
+    const off = Math.round(px * 0.012 * (i + 1));
+    ctx.fillStyle = color;
+    ctx.fillText(text, cx + off, topY + off);
+  });
+  // Main gradient fill.
+  const grad = ctx.createLinearGradient(0, topY, 0, topY + px);
+  grad.addColorStop(0, '#ffe9a8');
+  grad.addColorStop(0.45, '#ffd166');
+  grad.addColorStop(0.75, '#ff7a9e');
+  grad.addColorStop(1, '#ff5fa2');
+  ctx.fillStyle = grad;
+  ctx.fillText(text, cx, topY);
+  // Dark outline.
+  ctx.lineWidth = Math.max(2, Math.round(px * 0.02));
+  ctx.strokeStyle = '#1c0626';
+  ctx.strokeText(text, cx, topY);
+  // White top highlight: the same text in white, shifted up two pixels, overdrawn
+  // by the gradient fill shifted down — only the top edge stays white.
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+  ctx.fillText(text, cx, topY - Math.max(2, Math.round(px * 0.02)));
+  ctx.fillStyle = grad;
+  ctx.fillText(text, cx, topY + Math.max(1, Math.round(px * 0.012)));
+  ctx.restore();
+  return { px, bottom: topY + px * 1.08 };
+}
+
+function drawPillLabel(ctx, text, x, y, maxW, h) {
+  ctx.save();
+  ctx.font = `${Math.round(h * 0.52)}px "Bebas Neue", "Arial Narrow", sans-serif`;
+  const tw = Math.min(maxW - 12, ctx.measureText(text).width + 18);
+  const bx = x + (maxW - tw) / 2;
+  ctx.fillStyle = 'rgba(12, 8, 24, 0.88)';
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 1.5;
+  const r = h * 0.5;
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
-/* Slanted panel clip: a parallelogram whose top edge is shifted right by
- * ~12% of the panel height. Returns the path points for the gutter stroke. */
-function spSlantPath(ctx, x, y, w, h) {
-  const s = h * 0.12;
-  ctx.beginPath();
-  ctx.moveTo(x + s, y);
-  ctx.lineTo(x + w, y);
-  ctx.lineTo(x + w - s, y + h);
-  ctx.lineTo(x, y + h);
-  ctx.closePath();
-}
-
-function spSetSpacing(ctx, px) {
-  try { ctx.letterSpacing = px + 'px'; } catch (e) { /* older canvas: ignore */ }
-}
-
-/* The 3D wordmark: hard offset extrusion, neon glow, vertical gradient
- * fill, dark outline, white top highlight. The title fills the band:
- * it shrinks to fit 80% of the width, and it GROWS to at least
- * minFill of the width (0.62 normally) — on 16:9 the band is short,
- * so a height-only fit left the wordmark at ~38% of the canvas
- * (fix round 4, item 5). Growth is capped so the letters + extrusion
- * still clear the tagline. On 16:9 the caller passes minFill 0.55:
- * at 0.62 the wordmark grows so tall its extrusion eats the tagline
- * slot and the tagline lands on the footer (fix round 5, item 4) —
- * the band is only 24% tall and title + tagline + footer cannot all
- * fit under a 62% wordmark. 55% is the round-4 floor and it fits. */
-function spDrawTitle(ctx, text, cx, cy, maxW, maxH, style, minFill) {
-  // Start big and shrink to fit the width: on wide posters the band is
-  // short but the width is plentiful, so the title must grow to fill it.
-  const fill = minFill == null ? 0.62 : minFill;
-  let size = maxH * 0.95;
+  ctx.roundRect(bx, y, tw, h, r);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const setFont = (s) => { ctx.font = s + 'px Anton, "Arial Black", sans-serif'; };
-  setFont(Math.round(size));
-  spSetSpacing(ctx, Math.max(1, size * 0.02));
-  while (ctx.measureText(text).width < maxW * fill && size < maxH * 1.5) {
-    size *= 1.06;
-    setFont(Math.round(size));
-  }
-  while (ctx.measureText(text).width > maxW * 0.80 && size > 24) {
-    size *= 0.94;
-    setFont(Math.round(size));
-  }
-  const dark = '#230722';
-  // Hard extrusion, three layers down-right.
-  ctx.fillStyle = dark;
-  const steps = [0.03, 0.06, 0.09];
-  for (const k of steps) {
-    ctx.fillText(text, cx + size * k, cy + size * k * 1.4);
-  }
-  // Neon glow + gradient fill.
-  ctx.save();
-  ctx.shadowColor = style.accent;
-  ctx.shadowBlur = size * 0.16;
-  const grad = ctx.createLinearGradient(0, cy - size * 0.5, 0, cy + size * 0.55);
-  grad.addColorStop(0, style.titleTop);
-  grad.addColorStop(0.55, style.titleBottom);
-  grad.addColorStop(1, style.accent);
-  ctx.fillStyle = grad;
-  ctx.fillText(text, cx, cy);
+  ctx.shadowColor = 'rgba(255, 255, 255, 0.6)';
+  ctx.shadowBlur = 4;
+  ctx.fillText(text, bx + tw / 2, y + h / 2 + 1);
   ctx.restore();
-  // Dark outline.
-  ctx.lineWidth = Math.max(2, size * 0.045);
-  ctx.strokeStyle = '#16041a';
-  ctx.lineJoin = 'round';
-  ctx.strokeText(text, cx, cy);
-  // Thin white highlight along the top edge of the letters.
+}
+
+// One supporting panel: painted photo, slanted cut, neon gutter, bright pill label.
+async function drawPanel(ctx, def, rect, slant, state) {
+  const img = await loadImage('samples/' + def.photo);
+  const painted = paintPhoto(img, Math.max(8, rect.w), Math.max(8, rect.h), def.preset, 0.45);
   ctx.save();
   ctx.beginPath();
-  ctx.rect(cx - maxW / 2, cy - size * 0.58, maxW, size * 0.30);
+  ctx.moveTo(rect.x + slant, rect.y);
+  ctx.lineTo(rect.x + rect.w, rect.y);
+  ctx.lineTo(rect.x + rect.w - slant, rect.y + rect.h);
+  ctx.lineTo(rect.x, rect.y + rect.h);
+  ctx.closePath();
   ctx.clip();
-  ctx.fillStyle = 'rgba(255,255,255,0.55)';
-  ctx.fillText(text, cx, cy - Math.max(2, size * 0.02));
+  ctx.drawImage(painted, rect.x, rect.y, rect.w, rect.h);
+  // A little extra grade over the panel so it reads painted, not pasted.
+  ctx.fillStyle = 'rgba(255, 95, 162, 0.06)';
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
   ctx.restore();
-  spSetSpacing(ctx, 0);
-  return size;
-}
-
-function spDrawPill(ctx, x, y, text, accent, posterW) {
-  // The pill font scales with the poster (fix round 2: at thumbnail
-  // scale a fixed 13px pill overflowed its panel and read "THE GETA").
-  const fs = Math.max(5, Math.round((posterW || 1080) * 0.012));
-  ctx.font = Math.round(fs) + 'px "Bebas Neue", sans-serif';
-  spSetSpacing(ctx, 1);
-  const tw = ctx.measureText(text).width;
-  const pad = Math.max(3, Math.round(fs * 0.7));
-  const h = fs + 7;
+  // Neon edge on the panel's inner side.
   ctx.save();
-  spRoundRect(ctx, x, y, tw + pad * 2, h, h / 2);
-  ctx.fillStyle = accent;
-  ctx.fill();
-  ctx.fillStyle = '#16041a';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, x + pad, y + h / 2 + 1);
+  ctx.strokeStyle = 'rgba(255, 209, 102, 0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(rect.x + slant, rect.y);
+  ctx.lineTo(rect.x, rect.y + rect.h);
+  ctx.stroke();
   ctx.restore();
-  spSetSpacing(ctx, 0);
-  return { w: tw + pad * 2, h };
+  // The label is drawn later, after the title, so it can be moved clear of it.
 }
 
-/* Final unified grade: vignette, warm sun-side wash, fine grain. */
-function spGrade(ctx, W, H, style) {
-  const v = ctx.createRadialGradient(W / 2, H * 0.42, Math.min(W, H) * 0.42, W / 2, H * 0.5, Math.max(W, H) * 0.75);
-  v.addColorStop(0, 'rgba(8,2,18,0)');
-  v.addColorStop(1, 'rgba(8,2,18,0.30)');
-  ctx.fillStyle = v;
-  ctx.fillRect(0, 0, W, H);
-  const wash = ctx.createLinearGradient(W, 0, 0, H);
-  wash.addColorStop(0, 'rgba(255, 170, 90, 0.07)');
-  wash.addColorStop(0.6, 'rgba(255, 170, 90, 0)');
-  wash.addColorStop(1, 'rgba(40, 10, 80, 0.08)');
-  ctx.fillStyle = wash;
-  ctx.fillRect(0, 0, W, H);
-  // Fine grain, seeded so every render matches. Stronger than v1
-  // (fix round, item 5): the paint texture must read in the first second.
-  const rnd = spRand(4242);
-  ctx.fillStyle = 'rgba(255,255,255,0.075)';
-  const dots = Math.floor(W * H / 900);
-  for (let i = 0; i < dots; i++) {
-    ctx.fillRect(rnd() * W, rnd() * H, 1.6, 1.6);
-  }
-  ctx.fillStyle = 'rgba(0,0,0,0.075)';
-  for (let i = 0; i < dots; i++) {
-    ctx.fillRect(rnd() * W, rnd() * H, 1.6, 1.6);
-  }
+function drawFooter(ctx, state, w, h, titleBottom) {
+  const cy = h - Math.round(h * 0.028);
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `${Math.round(h * 0.02)}px "Bebas Neue", "Arial Narrow", sans-serif`;
+  ctx.fillStyle = '#ffd166';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+  ctx.shadowBlur = 4;
+  ctx.fillText('★ ★ ★ ★ ★', w / 2, cy - Math.round(h * 0.032));
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `${Math.round(h * 0.024)}px "Bebas Neue", "Arial Narrow", sans-serif`;
+  ctx.fillText(`${state.subtitle}   ·   ${state.footer}`, w / 2, cy);
+  ctx.restore();
+  return titleBottom;
 }
 
-/* Per-size hero framing (fix round 5, item 1; retuned fix round 7
- * for the real-photo hero). The hero-real faces sit right of centre
- * (photo x 0.42–0.83) and the focus sits right too (focus.x 0.68),
- * so the panel stack flips LEFT and the faces keep the whole right
- * side. Each size pans the crop so both faces sit fully in frame
- * with margins: square centres the pair at photo x ~0.55, portrait
- * (narrowest window, 0.53 of the photo) at ~0.57 with ~10 px margins
- * on both sides, wide shows the full photo width so dx is 0.
- * Scale is 1 everywhere: the base crop is already 1.0, and any
- * extra zoom would push the low front face under the title band.
- * (The front face is low in this photo — its chin lands near the
- * title band in every size; verified visually per size.) */
-const SP_HERO_FRAME = {
-  square: { dx: 0.09, scale: 1 },
-  portrait: { dx: 0.16, scale: 1 },
-  wide: { dx: 0, scale: 1 },
-};
+// Render one cover into ctx at the given size. Returns the layout used.
+export async function drawCover(ctx, state, sizeName) {
+  const side = resolvePanels(state);
+  const L = layoutFor(sizeName, side);
+  const { w, h } = L;
+  const meta = PHOTOS[state.photo] || PHOTOS['hero-real.jpg'];
+  const frame = (meta.frame && meta.frame[sizeName]) || { zoom: 1, fx: meta.focus.x, fy: meta.focus.y };
+  const fx = (state.focus && state.focus.x) ?? frame.fx;
+  const fy = (state.focus && state.focus.y) ?? frame.fy;
+  const zoom = (state.zoom || 1) * (frame.zoom || 1);
 
-/* Render the full poster. state: {photos, hero, panels, style, title,
- * subtitle, tagline, focus, backdrop}. imgMap: src -> loaded Image.
- * scale: render at W*scale (1 = export size, ~0.15 = style thumbnail).
- *
- * Fix round 4 layout: the hero is ONE full-bleed photo over the whole
- * canvas — no skyline band splitting it, no second hero draw over the
- * title (the "ghost face"). The title, tagline and footer sit on the
- * photo over a dark bottom gradient; the three supporting panels float
- * on the photo's right side. The procedural sunset backdrop is opt-in
- * only (state.backdrop, default off): when on, the photo fades into
- * the skyline in the lower half and the title gets its dark band back. */
-function spRenderPoster(state, sizeName, scale, imgMap) {
-  const dims = SP_SIZES[sizeName];
-  const W = Math.round(dims.w * scale);
-  const H = Math.round(dims.h * scale);
-  const style = SP_STYLES[state.style] || SP_STYLES.sunset;
-  // Fix round 5, item 1: the panel stack flips to the LEFT when the
-  // subject focus sits right of centre, so the subject is never
-  // covered, whatever photo is loaded. Fix round 9: the side is
-  // resolved through spResolvePanels — 'auto' keeps that focus rule,
-  // explicit left/right/off come from the editor toggle or ?panels=.
-  const panels = spResolvePanels(state);
-  const flipPanels = panels.flip;
-  // Fix round 8: per-size title height from state (0 if unset, e.g.
-  // a saved state from before the control existed).
-  const titleDY = (state.titleY && state.titleY[sizeName]) || 0;
-  const L = spLayoutFor(sizeName, flipPanels, titleDY, panels.off);
-  const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
+  // Backdrop first when the toggle is on; the hero sits inside a feathered ellipse on it.
+  if (state.backdrop) drawSunsetBackdrop(ctx, w, h);
 
-  const canvas = spCanvas(W, H);
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#12061f';
-  ctx.fillRect(0, 0, W, H);
+  const heroImg = await loadImage('samples/' + state.photo);
+  const painted = paintPhoto(heroImg, w, h, state.preset, PRESETS[state.preset].strength);
+  if (sizeName === 'portrait') unsharp(painted, 0.4, 1.2);
 
-  // One painting level for hero and panels (fix round 4, item 4):
-  // 0.47 — the same preset everywhere, so the poster reads as one
-  // painted world instead of three different treatments.
-  const PAINT = 0.47;
-
-  // Hero: ONE full-bleed painted photo, top to bottom (fix round 4,
-  // item 2) — no skyline band splitting it, no neon frame (its right
-  // edge was the thin stray line on the wide hero). The procedural
-  // sunset backdrop is opt-in only (state.backdrop, default off):
-  // when on, the photo fades into the skyline in the lower half.
-  const heroImg = imgMap.get(state.photos[state.hero.photo]);
-  let heroPainted = null;
-  if (heroImg) {
-    // Per-size hero framing (fix round 5, item 1 — see SP_HERO_FRAME):
-    // pan/zoom the crop so both faces sit left of the panel stack.
-    const frame = SP_HERO_FRAME[sizeName] || { dx: 0, scale: 1 };
-    const heroCrop = {
-      ...state.hero.crop,
-      x: Math.max(0, Math.min(0.95, (state.hero.crop.x ?? 0.5) + frame.dx)),
-      scale: (state.hero.crop.scale || 1) * frame.scale,
-    };
-    heroPainted = spPaintPhoto(heroImg, style.ramp, W, H, heroCrop, PAINT);
-    // Fix round 5, item 3: the 4:5 hero upscales the square sample
-    // ~1.25x, so faces go soft — a light unsharp mask after scaling.
-    if (sizeName === 'portrait') spUnsharp(heroPainted, 0.4, 1.2);
-  }
   if (state.backdrop) {
-    spDrawBackdrop(ctx, 0, 0, W, H, style.backdrop);
+    // Feathered subject-focus mask: the painted hero shows through an ellipse
+    // centred on the focus point; the backdrop shows around it.
+    const mask = document.createElement('canvas');
+    mask.width = w; mask.height = h;
+    const mctx = mask.getContext('2d');
+    const ex = fx * w, ey = fy * h;
+    const grad = mctx.createRadialGradient(ex, ey, 0, ex, ey, Math.max(w, h) * 0.62);
+    grad.addColorStop(0, 'rgba(0,0,0,1)');
+    grad.addColorStop(0.72, 'rgba(0,0,0,1)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    mctx.fillStyle = grad;
+    mctx.fillRect(0, 0, w, h);
+    const heroCut = document.createElement('canvas');
+    heroCut.width = w; heroCut.height = h;
+    const hctx = heroCut.getContext('2d');
+    const win = coverWindow(painted.width, painted.height, w, h, fx, fy, zoom);
+    hctx.drawImage(painted, win.sx, win.sy, win.sw, win.sh, 0, 0, w, h);
+    hctx.globalCompositeOperation = 'destination-in';
+    hctx.drawImage(mask, 0, 0);
+    ctx.drawImage(heroCut, 0, 0);
+  } else {
+    const win = coverWindow(painted.width, painted.height, w, h, fx, fy, zoom);
+    ctx.drawImage(painted, win.sx, win.sy, win.sw, win.sh, 0, 0, w, h);
   }
-  if (heroPainted) {
-    if (state.backdrop) {
-      const mask = spHeroMask(W, H);
-      const cut = spCanvas(W, H);
-      const cctx = cut.getContext('2d');
-      cctx.drawImage(heroPainted, 0, 0);
-      cctx.globalCompositeOperation = 'destination-in';
-      cctx.drawImage(mask, 0, 0);
-      ctx.drawImage(cut, 0, 0);
-    } else {
-      ctx.drawImage(heroPainted, 0, 0);
+
+  // Supporting panels down the chosen side. Labels are collected here and
+  // drawn after the title, so a label never hides behind the wordmark.
+  const panelLabels = [];
+  if (side) {
+    const px = side === 'left' ? 0 : w - L.panelW;
+    const gap = L.gutter;
+    const n = PANEL_DEFS.length;
+    const totalH = h;
+    const eachH = Math.round((totalH - gap * (n - 1)) / n);
+    const slant = Math.round(L.panelW * 0.16);
+    for (let i = 0; i < n; i++) {
+      const rect = { x: px, y: i * (eachH + gap), w: L.panelW, h: eachH };
+      await drawPanel(ctx, PANEL_DEFS[i], rect, i % 2 === 0 ? slant : -slant, state);
+      panelLabels.push({ def: PANEL_DEFS[i], rect });
     }
   }
 
-  // Dark bottom gradient over the full width, so the title, tagline
-  // and footer read over the photo (and over the skyline when the
-  // backdrop is on). No hard band rect, no accent rule — the old
-  // 3 px rule read as a stray divider line.
-  const grad = ctx.createLinearGradient(0, H * 0.50, 0, H);
-  grad.addColorStop(0, 'rgba(10, 3, 18, 0)');
-  grad.addColorStop(0.55, 'rgba(10, 3, 18, 0.45)');
-  grad.addColorStop(1, 'rgba(10, 3, 18, 0.78)');
+  // Dark legibility gradient under the title band.
+  const titleTop = Math.round(h * (L.titleY + (state.titleLift || 0) * 0.00035));
+  const grad = ctx.createLinearGradient(0, titleTop - h * 0.14, 0, h);
+  grad.addColorStop(0, 'rgba(8, 4, 18, 0)');
+  grad.addColorStop(0.45, 'rgba(8, 4, 18, 0.55)');
+  grad.addColorStop(1, 'rgba(8, 4, 18, 0.88)');
   ctx.fillStyle = grad;
-  ctx.fillRect(0, H * 0.50, W, H * 0.50);
+  ctx.fillRect(0, titleTop - h * 0.14, w, h - (titleTop - h * 0.14));
 
-  // Supporting panels: one warm family, painted at 2x and drawn down
-  // (fix round 4, item 4), slanted cut, neon gutter.
-  const labels = ['THE CREW', 'THE GETAWAY', 'THE SCORE'];
-  // A beach with no people is THE SHORE, graded golden (fix round 4,
-  // item 8) — never the purple vice ramp, whatever slot it lands in.
-  const SP_PHOTO_RAMP = {
-    'samples/beach-night.jpg': 'golden',
-    'samples/palm-beach.jpg': 'golden',
-  };
-  L.supports.forEach((f, i) => {
-    const p = R(f);
-    const panel = state.panels[i];
-    if (!panel) return;
-    const img = imgMap.get(state.photos[panel.photo]);
-    if (!img) return;
-    const ramp = SP_PHOTO_RAMP[state.photos[panel.photo]]
-      || (sizeName === 'wide'
-        ? ['sunset', 'golden', 'vice'][i]
-        : style.panels[i % style.panels.length]);
-    // Face-zone crop (item 5): the panel's crop centres on the photo's
-    // faces (upper third by default), never on its middle.
-    const faceCrop = { ...panel.crop, y: spFaceY(state.photos[panel.photo]) };
-    // Fix round 5, item 2: painted at the panel's OUTPUT resolution.
-    // The old 2x paint + draw-down halved the 1 px ink lines and
-    // smoothed the posterize steps with the downscale, so the panels
-    // read only ~15% painted next to the hero (painted at 1x). At 1x
-    // the ink and the bands stay full-strength, matching the hero.
-    const painted = spPaintPhoto(img, ramp,
-      Math.max(2, Math.round(p.w)), Math.max(2, Math.round(p.h)), faceCrop, PAINT);
-    ctx.save();
-    spSlantPath(ctx, p.x, p.y, p.w, p.h);
-    ctx.clip();
-    // Wide posters: lift the right panels ~12% brighter and pull the
-    // magenta back a little so both sides read as one world (fix item 7).
-    // Fix round 5, item 5: THE SHORE (beach/palm, golden ramp) gets
-    // +25% saturation — its sea read grey-green mud next to the
-    // saturated hero. (The amber shift itself lives in the golden
-    // branch of spPaintPhoto.)
-    const isShore = state.photos[panel.photo] === 'samples/beach-night.jpg'
-      || state.photos[panel.photo] === 'samples/palm-beach.jpg';
-    // Fix round 8: THE SCORE (group-night) reads dark — +20% brightness
-    // in every size. The wide 1.12 lift stays for the other panels.
-    // Fix round 9: THE CREW (selfie-day) and THE GETAWAY (friends-day)
-    // read just as dark next to it — the same +20% lift for all three
-    // panel photos, so the stack reads as one brightness.
-    const SP_BRIGHT_PANELS = ['samples/group-night.jpg', 'samples/selfie-day.jpg', 'samples/friends-day.jpg'];
-    const needsLift = SP_BRIGHT_PANELS.includes(state.photos[panel.photo]);
-    let bright = sizeName === 'wide' ? 1.12 : 1;
-    let sat = sizeName === 'wide' ? 0.92 : 1;
-    if (needsLift) bright = Math.max(bright, 1.2);
-    if (isShore) sat = 1.25;
-    const filt = (bright !== 1 || sat !== 1)
-      ? 'brightness(' + bright.toFixed(2) + ') saturate(' + sat.toFixed(2) + ')' : 'none';
-    if (filt !== 'none') ctx.filter = filt;
-    ctx.drawImage(painted, p.x, p.y, p.w, p.h);
-    ctx.filter = 'none';
-    ctx.restore();
-    ctx.save();
-    spSlantPath(ctx, p.x, p.y, p.w, p.h);
-    ctx.strokeStyle = style.gutter;
-    ctx.globalAlpha = 0.9;
-    ctx.lineWidth = Math.max(2, W * 0.003);
-    ctx.stroke();
-    ctx.restore();
-    // Labels follow the PHOTO, not the panel slot (fix round 2: the wide
-    // cover's photos differ from the square's, so slot labels mismatched
-    // — a beach with no people was labelled "THE SCORE").
-    const SP_PHOTO_LABELS = {
-      'samples/hero-real.jpg': 'THE HEIST',
-      'samples/selfie-day.jpg': 'THE CREW',
-      'samples/friends-day.jpg': 'THE GETAWAY',
-      'samples/group-night.jpg': 'THE SCORE',
-      'samples/beach-night.jpg': 'THE SHORE',
-      'samples/heist-duo.jpg': 'THE HEIST',
-      'samples/getaway.jpg': 'THE GETAWAY',
-      'samples/hotel-night.jpg': 'THE SCORE',
-      'samples/neon-street.jpg': 'THE CREW',
-      'samples/palm-beach.jpg': 'THE SHORE',
-    };
-    spDrawPill(ctx, p.x + 10 * scale + p.h * 0.12, p.y + 10 * scale,
-      SP_PHOTO_LABELS[state.photos[panel.photo]] || panel.label || labels[i] || 'PANEL',
-      style.accent, W);
-  });
-
-  // Title: on the photo over the bottom gradient — no breakout draw.
-  // The second hero fragment over the letters was the "ghost face"
-  // (fix round 4, item 1); the title sits cleanly on its own
-  // background now. With the backdrop on, the title gets its dark
-  // band back (the old composition), still with no accent rule.
-  const tR = R(L.title);
-  if (state.backdrop) {
-    ctx.fillStyle = 'rgba(10, 3, 18, 0.55)';
-    ctx.fillRect(tR.x, tR.y, tR.w, tR.h);
-  }
-
-  // Wordmark + tagline. The title sits lower in its band and the tagline
-  // closer under it (fix round 2, item 8): no more dead air inside the band.
-  // Fix round 5, item 4: on 16:9 the wordmark is capped at 55% width and
-  // sits a little higher (0.47) — at 62%/0.50 its extrusion reaches the
-  // tagline slot and the tagline lands on the footer subtitle.
-  // Fix round 9: 52% instead (~5% smaller) and the wide title sits
-  // 1% lower by default (see titleY) — the real-photo hero's low chin
-  // still grazed the wordmark's top edge at 55%. Do NOT just lower it:
-  // the subtitle/tagline sit tight below and would collide.
-  const titleCx = tR.x + tR.w / 2;
-  const titleCy = tR.y + tR.h * (sizeName === 'wide' ? 0.47 : 0.50);
-  const titleSize = spDrawTitle(ctx, state.title, titleCx, titleCy, tR.w, tR.h * 0.70, style,
-    sizeName === 'wide' ? 0.52 : 0.62);
-
-  if (state.tagline) {
-    // Bebas Neue, not script/serif (fix round 2, item 6): the tagline
-    // must be a bundled OFL condensed face, and it must stay legible.
-    const tagFont = Math.round(Math.max(16, tR.h * 0.175));
-    ctx.font = tagFont + 'px "Bebas Neue", sans-serif';
-    spSetSpacing(ctx, Math.max(1, tR.h * 0.02));
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    // Fix round 5, item 4: the tagline sits 10 px below the lowest
-    // point of the title's extrusion (cap half ~0.36em + the 3-layer
-    // down-right extrusion ~0.126em), never on it. The old fixed
-    // 0.86 slot touched the extrusion on 16:9, where the wordmark
-    // grows widest; on square/portrait this lands within a few px of
-    // the old slot, so nothing else moves. The 10 px gap scales with
-    // the render (10 * scale): a fixed 10 px is 21 export px in the
-    // editor preview and pushes the tagline onto the footer there.
-    const tagY = titleCy + titleSize * 0.486 + 10 * scale + tagFont * 0.36;
-    ctx.fillStyle = '#0a0312';
-    ctx.fillText(state.tagline, titleCx, tagY + Math.max(2, tR.h * 0.02));
-    ctx.fillStyle = style.sub;
-    ctx.fillText(state.tagline, titleCx, tagY);
-    spSetSpacing(ctx, 0);
-  }
-
-  // Footer: star row, subtitle, press mark — on the bottom gradient,
-  // so it reads over the photo in every size (fix round 4, item 2:
-  // the portrait mini-skyline is gone with the rest of the skyline).
-  const fR = R(L.footer);
-  const fy = fR.y + fR.h / 2;
-  // Fix round 5, item 4: the wide footer is ~1.4x larger. The wide
-  // footer band is only 6% of the height, so its stars/subtitle/press
-  // mark read tiny next to the huge wordmark; square (8.5%) and
-  // portrait (9%) are already big enough and stay as they are.
-  const footScale = sizeName === 'wide' ? 1.4 : 1;
-  // Bebas Neue for the stars too (fix round 3, item 1: the last
-  // plain `sans-serif` in the renderer — pinned so no text on any
-  // cover can fall back to a generic face a reviewer might misread).
-  ctx.font = Math.round(Math.max(12, fR.h * 0.32) * footScale) + 'px "Bebas Neue", sans-serif';
-  ctx.fillStyle = '#ffcf4d';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('★★★★★', fR.x + 12 * scale, fy);
-  ctx.font = Math.round(Math.max(14, fR.h * 0.46) * footScale) + 'px "Bebas Neue", sans-serif';
-  spSetSpacing(ctx, Math.max(1, fR.h * 0.06));
+  // Kicker above the title, title, then the footer row.
+  const kickerY = titleTop - Math.round(h * 0.03);
+  ctx.save();
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#0a0312';
-  ctx.fillText(state.subtitle, fR.x + fR.w / 2, fy + Math.max(2, fR.h * 0.03));
-  ctx.fillStyle = '#f5e9ff';
-  ctx.fillText(state.subtitle, fR.x + fR.w / 2, fy);
-  spSetSpacing(ctx, 0);
-  ctx.font = Math.round(Math.max(11, fR.h * 0.30) * footScale) + 'px "Bebas Neue", sans-serif';
-  ctx.fillStyle = style.accent;
-  ctx.textAlign = 'right';
-  ctx.fillText('SUNSET PRESS', fR.x + fR.w - 12 * scale, fy);
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = `${Math.round(h * 0.026)}px "Bebas Neue", "Arial Narrow", sans-serif`;
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 2;
+  const kicker = state.kicker || '';
+  if (kicker) ctx.fillText(kicker.split('').join(' '), w / 2, kickerY);
+  ctx.restore();
 
-  spGrade(ctx, W, H, style);
+  const titleMax = Math.round(w * L.titleFill);
+  const drawn = drawTitle(ctx, state.title || 'SUNSET HEIST', w / 2, titleTop, titleMax, w);
+  // Panel labels, on top of everything: a label whose pill would cross the
+  // wordmark is slid down to just below it, still inside its own panel.
+  const titleRect = { x0: w / 2 - titleMax / 2, x1: w / 2 + titleMax / 2, y0: titleTop, y1: drawn.bottom };
+  for (const { def, rect } of panelLabels) {
+    const lh = Math.max(18, Math.round(rect.h * 0.09));
+    let ly = rect.y + Math.round(rect.h * 0.06);
+    ctx.save();
+    ctx.font = `${Math.round(lh * 0.52)}px "Bebas Neue", "Arial Narrow", sans-serif`;
+    const tw = Math.min(rect.w - 12, ctx.measureText(def.label).width + 18);
+    ctx.restore();
+    const lx0 = rect.x + (rect.w - tw) / 2;
+    const lx1 = lx0 + tw;
+    const hitsTitle = lx1 > titleRect.x0 && lx0 < titleRect.x1 && ly + lh > titleRect.y0 && ly < titleRect.y1;
+    if (hitsTitle) ly = Math.min(titleRect.y1 + 14, rect.y + rect.h - lh - 8);
+    drawPillLabel(ctx, def.label, rect.x, ly, rect.w, lh);
+  }
+  drawFooter(ctx, state, w, h, drawn.bottom);
+  return L;
+}
+
+// Render a cover at its exact export size into a fresh canvas.
+export async function renderCover(state, sizeName) {
+  await waitForFonts();
+  const { w, h } = SIZES[sizeName];
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  await drawCover(ctx, state, sizeName);
   return canvas;
+}
+
+// Export one size as a PNG download. Returns the blob for tests.
+export async function exportCover(state, sizeName) {
+  const canvas = await renderCover(state, sizeName);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `sunset-press-${SIZES[sizeName].w}x${SIZES[sizeName].h}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return blob;
+}
+
+export async function exportAllSizes(state) {
+  const out = {};
+  for (const name of Object.keys(SIZES)) {
+    out[name] = await exportCover(state, name);
+  }
+  return out;
 }

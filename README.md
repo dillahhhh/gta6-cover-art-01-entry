@@ -1,60 +1,59 @@
-# SUNSET PRESS
+# SUNSET PRESS — one photo in, a full key-art poster out
 
-[![gta6-cover-art-01](https://make.fun/badge/gta6-cover-art-01.svg)](https://make.fun/bounty/gta6-cover-art-01)
-[![rank](https://make.fun/badge/gta6-cover-art-01/dillahhhh/gta6-cover-art-01-entry/rank.svg)](https://make.fun/bounty/gta6-cover-art-01)
-[![reward](https://make.fun/badge/gta6-cover-art-01/dillahhhh/gta6-cover-art-01-entry/reward.svg)](https://make.fun/bounty/gta6-cover-art-01)
-
-One photo in. A full key-art poster out. **SUNSET PRESS** is a single-page
-web app that runs entirely offline in a desktop browser: drop in your photos,
-pick a poster style, write the headline, and export a GTA 6-style cover as a
-PNG to share.
+An offline web app that turns any photo and a caption into GTA 6-style cover art:
+a multi-panel poster with bold lettering and a Vice City sunset or neon grade,
+exported as a PNG to share. Made for the make.fun competition
+`gta6-cover-art-01`.
 
 ## What it does
 
-- **Your photos, local only.** Upload photos or use the built-in samples.
-  Photos are read on your machine and never uploaded anywhere.
-- **Painted key-art engine, not a filter.** Every photo is run through a
-  canvas pipeline — smoothing, a posterized gradient map, a Sobel ink
-  outline, shadow grain and a rim light — so each panel reads as
-  illustration, not a filtered photo.
-- **Full-bleed hero + supporting cast composition.** One painted photo
-  fills the whole poster, top to bottom, with the title, tagline and
-  footer sitting on it over a dark bottom gradient, plus three slanted
-  supporting panels on the right, each in a warm colour treatment, with
-  editable pill labels.
-- **Procedural Vice City sunset (opt-in).** A "Sunset backdrop" toggle
-  paints the skyline in code — a striped sun, banded clouds, a neon
-  art-deco skyline and palm silhouettes — behind the hero photo, which
-  fades into it in the lower half. Off by default: the hero is one
-  full photo.
-- **Big original lettering.** A huge gold-to-pink 3D wordmark with
-  extrusion, outline, neon glow and a top highlight, set in SIL Open Font
-  License faces bundled under `app/fonts/` (Anton, Bebas Neue).
-  No Rockstar logo, artwork or font anywhere.
-- **6 poster styles** (Sunset, Neon Night, Teal Dusk, Mono Pink, Golden
-  Hour, Vice Pop), each setting the grade and lettering together,
-  shown as live thumbnails of your actual photo.
-- **Exact export sizes.** 1080×1080, 1080×1350 and 1920×1080, each
-  re-laid out (not just re-cropped), exported as exact-size PNGs.
-- **Fast editor.** Live preview that is the true render, click-to-crop
-  with drag pan and wheel zoom, a draggable subject-focus ring, undo/redo,
-  shuffle, and autosave to localStorage.
-- **One-click cover.** The big MAKE MY COVER button picks a fresh style
-  and exports the current size in one tap.
-- **Ordinary photos become key art.** The built-in samples include
-  ordinary daylight photos (a selfie and friends in a park) alongside
-  the cinematic cast shots, and every panel crops to the faces, so an
-  ordinary phone selfie visibly becomes key art.
-- Hero photo: Jace Ulloa / Unsplash (two men at a lakeside at golden hour).
+- **One photo in.** Pick a bundled sample or upload your own. The photo fills
+  the hero panel and the three supporting panels, each with its own paint grade.
+- **Painted key art, not a filter.** A hand-written canvas pipeline (smoothing,
+  posterize, gradient map, ink outline, grain, vignette) turns photos into flat
+  "ink and paint" poster art. Four grades: Sunset, Neon Night, Teal Dusk,
+  Mono Pink.
+- **Real poster layout.** A large hero, three supporting panels with slanted
+  cuts and neon gutters, a huge gradient wordmark with extrusion and glow, a
+  star row and a footer line. Panels go Auto (the side that never covers a
+  face), Left, Right or Off.
+- **Any photo.** Drag the preview to pan the hero, scroll to zoom; the crop
+  always recentres on the subject. A Subject Focus point per photo keeps faces
+  in frame, and the title band can be nudged up or down with the Title height
+  slider so it never sits on a face.
+- **Fast and easy.** Three steps — photo, style, caption — then Export PNG in
+  1080 × 1080, 1080 × 1350 and 1920 × 1080, one at a time or all three at once.
+  Undo/redo and autosave to localStorage.
+- **Optional Sunset Backdrop.** A procedural Vice City sunset (sun disc,
+  banded clouds, palm silhouettes, art-deco skyline) behind the hero, with a
+  feathered subject-focus mask. Off by default.
 
-## Try it
+## Run it
 
-Serve `app/` with any static server (for example `node serve.ts`, then open
-http://localhost:8080) and it works with no network request.
+```sh
+node serve.ts            # serves app/ on http://localhost:8080
+```
 
-## Screenshots
+No build step, no network: every script, font and photo lives under `app/`.
+The hand-in program is `main.ts` (Node 22): it copies `app/` and
+`screenshots/` to `/output` and writes `dossier.json`.
 
-`shots.json` records how each screenshot in `screenshots/` was taken:
-`1-cover.jpg` is the exported square poster, `2-editor.jpg` the editor with
-a photo loaded, `3-cover-portrait.jpg` the portrait export and
-`4-cover-wide.jpg` the wide export.
+Screenshots are taken by `shots4.py` (Playwright): it serves the app, opens
+each scene from `shots.json`, waits for the app to finish rendering, and saves
+a JPEG under `screenshots/` — wide cover, square cover, editor, portrait cover.
+
+## Credits and rights
+
+- Cover photo `app/samples/hero-real.jpg`: Jace Ulloa, via Unsplash
+  (two men at a lakeside at golden hour). Used with attribution; the photo is
+  not claimed as our own.
+- The other sample photos under `app/samples/` were made for this app with an
+  image model and are free to use.
+- Fonts: Anton and Bebas Neue, both under the SIL Open Font License 1.1
+  (see `app/fonts/OFL.txt`).
+- No Rockstar Games logo, artwork, character or font is used anywhere. All
+  lettering, panels and grades are original.
+
+## Licence
+
+MIT — see `LICENSE`.

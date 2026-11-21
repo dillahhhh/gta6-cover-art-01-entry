@@ -1,631 +1,414 @@
-'use strict';
-/* SUNSET PRESS — editor.
- *
- * One screen, three steps: photos, style, caption. The live preview is the
- * true render (same engine as the export). Click a panel to crop it, drag
- * to pan, wheel to zoom, drag the pink ring to move the subject focus.
- * Everything stays on the machine: photos are read locally, never uploaded.
- */
+// ui.js — SUNSET PRESS editor: state, controls, live preview, export, shot mode.
+// The app runs fully offline: every photo, font and script lives under app/.
+import {
+  SIZES, PHOTOS, PANEL_DEFS, DEFAULT_STATE,
+  loadImage, waitForFonts, renderCover, drawCover, resolvePanels, exportCover, exportAllSizes,
+} from './render.js';
+import { paintPhoto, PRESETS } from './paint.js';
 
-const SP_SAMPLES = [
-  'samples/hero-real.jpg',
-  'samples/heist-duo.jpg',
-  'samples/selfie-day.jpg',
-  'samples/friends-day.jpg',
-  'samples/getaway.jpg',
-  'samples/hotel-night.jpg',
-  'samples/beach-night.jpg',
-  'samples/group-night.jpg',
-  'samples/neon-street.jpg',
-  'samples/palm-beach.jpg',
-];
-const SP_DEFAULT_LABELS = ['THE CREW', 'THE GETAWAY', 'THE SCORE'];
+const STORE_KEY = 'sunset-press-state-v1';
+const $ = (id) => document.getElementById(id);
 
-function spDefaultState() {
-  // The hero is a real photograph (fix round 7): two men at a lakeside
-  // at golden hour (Jace Ulloa / Unsplash) — both faces fully in frame,
-  // right of centre, so the panel stack flips left (focus.x > 0.5).
-  const photos = ['samples/hero-real.jpg', 'samples/selfie-day.jpg', 'samples/friends-day.jpg', 'samples/group-night.jpg'];
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return { ...DEFAULT_STATE };
+    const saved = JSON.parse(raw);
+    return { ...DEFAULT_STATE, ...saved, focus: saved.focus ?? null };
+  } catch {
+    return { ...DEFAULT_STATE };
+  }
+}
+
+let state = loadState();
+let history = [];
+let historyAt = -1;
+let previewTimer = null;
+let previewBusy = false;
+
+function saveState() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch { /* private mode */ }
+}
+
+function pushHistory() {
+  history = history.slice(0, historyAt + 1);
+  history.push(JSON.stringify(state));
+  if (history.length > 40) history.shift();
+  historyAt = history.length - 1;
+  updateUndoRedo();
+}
+
+function applyHistory(dir) {
+  const next = historyAt + dir;
+  if (next < 0 || next >= history.length) return;
+  historyAt = next;
+  state = JSON.parse(history[historyAt]);
+  saveState();
+  syncControls();
+  schedulePreview();
+  updateUndoRedo();
+}
+
+function updateUndoRedo() {
+  const undo = $('undoBtn'), redo = $('redoBtn');
+  if (undo) undo.disabled = historyAt <= 0;
+  if (redo) redo.disabled = historyAt >= history.length - 1;
+}
+
+function setStatus(text) {
+  const el = $('status');
+  if (el) el.textContent = text;
+}
+
+// ---- preview ---------------------------------------------------------------
+async function renderPreview() {
+  const canvas = $('preview');
+  if (!canvas) return;
+  previewBusy = true;
+  setStatus('Rendering…');
+  try {
+    const full = await renderCover(state, state.size);
+    // Draw the full-size render scaled into the preview canvas.
+    const { w, h } = SIZES[state.size];
+    const maxW = 860;
+    const scale = Math.min(1, maxW / w);
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(full, 0, 0, canvas.width, canvas.height);
+    setStatus(`${SIZES[state.size].label} · ${state.photo} · ${PRESETS[state.preset].label} · panels ${resolvePanels(state) || 'off'}`);
+  } catch (err) {
+    setStatus('Render failed: ' + err.message);
+  } finally {
+    previewBusy = false;
+  }
+}
+
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(renderPreview, 220);
+}
+
+// ---- style thumbnails -------------------------------------------------------
+async function renderStyleThumbs() {
+  const row = $('styleRow');
+  if (!row) return;
+  const img = await loadImage('samples/' + state.photo).catch(() => null);
+  if (!img) return;
+  for (const name of Object.keys(PRESETS)) {
+    let btn = row.querySelector(`[data-preset="${name}"]`);
+    if (!btn) continue;
+    const cv = btn.querySelector('canvas');
+    if (!cv) continue;
+    const painted = paintPhoto(img, 168, 104, name, PRESETS[name].strength);
+    cv.width = 168; cv.height = 104;
+    cv.getContext('2d').drawImage(painted, 0, 0);
+    btn.classList.toggle('active', state.preset === name);
+  }
+}
+
+// ---- controls ----------------------------------------------------------------
+function syncControls() {
+  const set = (id, value) => { const el = $(id); if (el) el.value = value; };
+  set('titleInput', state.title);
+  set('kickerInput', state.kicker);
+  set('subtitleInput', state.subtitle);
+  set('footerInput', state.footer);
+  set('titleLift', String(state.titleLift || 0));
+  const liftVal = $('titleLiftVal');
+  if (liftVal) liftVal.textContent = `${state.titleLift > 0 ? '+' : ''}${state.titleLift || 0}%`;
+  const backdrop = $('backdropToggle');
+  if (backdrop) backdrop.checked = !!state.backdrop;
+  document.querySelectorAll('#panelsSeg button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.panels === state.panels);
+  });
+  document.querySelectorAll('#sizeTabs button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.size === state.size);
+  });
+  document.querySelectorAll('#photoStrip button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.photo === state.photo);
+  });
+}
+
+function bindControls() {
+  const onText = (id, key) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      state[key] = el.value;
+      saveState();
+      schedulePreview();
+    });
+    el.addEventListener('change', pushHistory);
+  };
+  onText('titleInput', 'title');
+  onText('kickerInput', 'kicker');
+  onText('subtitleInput', 'subtitle');
+  onText('footerInput', 'footer');
+
+  const lift = $('titleLift');
+  if (lift) {
+    lift.addEventListener('input', () => {
+      state.titleLift = Number(lift.value);
+      const liftVal = $('titleLiftVal');
+      if (liftVal) liftVal.textContent = `${state.titleLift > 0 ? '+' : ''}${state.titleLift}%`;
+      saveState();
+      schedulePreview();
+    });
+    lift.addEventListener('change', pushHistory);
+  }
+
+  const backdrop = $('backdropToggle');
+  if (backdrop) {
+    backdrop.addEventListener('change', () => {
+      state.backdrop = backdrop.checked;
+      saveState();
+      pushHistory();
+      schedulePreview();
+    });
+  }
+
+  document.querySelectorAll('#panelsSeg button').forEach((b) => {
+    b.addEventListener('click', () => {
+      state.panels = b.dataset.panels;
+      saveState();
+      pushHistory();
+      syncControls();
+      schedulePreview();
+    });
+  });
+
+  document.querySelectorAll('#sizeTabs button').forEach((b) => {
+    b.addEventListener('click', () => {
+      state.size = b.dataset.size;
+      saveState();
+      pushHistory();
+      syncControls();
+      schedulePreview();
+    });
+  });
+
+  document.querySelectorAll('#photoStrip button').forEach((b) => {
+    b.addEventListener('click', async () => {
+      state.photo = b.dataset.photo;
+      state.focus = null;
+      state.zoom = 1;
+      saveState();
+      pushHistory();
+      syncControls();
+      await renderStyleThumbs();
+      schedulePreview();
+    });
+  });
+
+  document.querySelectorAll('#styleRow button').forEach((b) => {
+    b.addEventListener('click', () => {
+      state.preset = b.dataset.preset;
+      saveState();
+      pushHistory();
+      renderStyleThumbs();
+      schedulePreview();
+    });
+  });
+
+  const upload = $('uploadInput');
+  const uploadBtn = $('uploadBtn');
+  if (upload && uploadBtn) {
+    uploadBtn.addEventListener('click', () => upload.click());
+    upload.addEventListener('change', async () => {
+      const file = upload.files && upload.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      try {
+        await loadImage(url);
+      } catch {
+        setStatus('That file did not load as a photo.');
+        return;
+      }
+      // Uploaded photos join the strip as a one-off hero choice.
+      const strip = $('photoStrip');
+      if (strip) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.photo = url;
+        btn.textContent = file.name.length > 18 ? file.name.slice(0, 17) + '…' : file.name;
+        btn.addEventListener('click', () => {
+          state.photo = url;
+          state.focus = { x: 0.5, y: 0.4 };
+          state.zoom = 1;
+          saveState();
+          pushHistory();
+          syncControls();
+          schedulePreview();
+        });
+        strip.appendChild(btn);
+      }
+      state.photo = url;
+      state.focus = { x: 0.5, y: 0.4 };
+      state.zoom = 1;
+      saveState();
+      pushHistory();
+      syncControls();
+      await renderStyleThumbs();
+      schedulePreview();
+    });
+  }
+
+  // Drag the preview to pan the hero; wheel to zoom. Both keep faces in frame
+  // because the crop always recentres on the focus point.
+  const wrap = $('previewWrap');
+  const canvas = $('preview');
+  if (wrap && canvas) {
+    let dragging = null;
+    canvas.addEventListener('pointerdown', (e) => {
+      dragging = { x: e.clientX, y: e.clientY };
+      canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const meta = PHOTOS[state.photo];
+      const base = (state.focus || (meta && meta.focus) || { x: 0.5, y: 0.4 });
+      const dx = (e.clientX - dragging.x) / rect.width;
+      const dy = (e.clientY - dragging.y) / rect.height;
+      state.focus = {
+        x: Math.max(0.05, Math.min(0.95, base.x - dx * 0.6)),
+        y: Math.max(0.05, Math.min(0.95, base.y - dy * 0.6)),
+      };
+      dragging = { x: e.clientX, y: e.clientY };
+      saveState();
+      schedulePreview();
+    });
+    canvas.addEventListener('pointerup', () => {
+      if (dragging) { dragging = null; pushHistory(); }
+    });
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      state.zoom = Math.max(1, Math.min(2.2, (state.zoom || 1) * (e.deltaY < 0 ? 1.08 : 0.93)));
+      saveState();
+      schedulePreview();
+    }, { passive: false });
+  }
+
+  const makeBtn = $('makeCoverBtn');
+  if (makeBtn) {
+    makeBtn.addEventListener('click', () => {
+      pushHistory();
+      schedulePreview();
+      setStatus('Cover ready — pick a size and Export PNG.');
+      const preview = $('previewWrap');
+      if (preview) preview.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+
+  const exportAll = $('exportAllBtn');
+  if (exportAll) {
+    exportAll.addEventListener('click', async () => {
+      setStatus('Exporting all three sizes…');
+      try {
+        await exportAllSizes(state);
+        setStatus('Exported 1080 × 1080, 1080 × 1350 and 1920 × 1080 PNGs.');
+      } catch (err) {
+        setStatus('Export failed: ' + err.message);
+      }
+    });
+  }
+
+  const exportOne = $('exportOneBtn');
+  if (exportOne) {
+    exportOne.addEventListener('click', async () => {
+      const sel = $('exportSize');
+      const size = sel ? sel.value : state.size;
+      setStatus(`Exporting ${SIZES[size].label}…`);
+      try {
+        await exportCover(state, size);
+        setStatus(`Exported ${SIZES[size].label}.`);
+      } catch (err) {
+        setStatus('Export failed: ' + err.message);
+      }
+    });
+  }
+
+  const undo = $('undoBtn');
+  if (undo) undo.addEventListener('click', () => applyHistory(-1));
+  const redo = $('redoBtn');
+  if (redo) redo.addEventListener('click', () => applyHistory(1));
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      applyHistory(e.shiftKey ? 1 : -1);
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      exportCover(state, state.size);
+    }
+  });
+}
+
+// ---- shot mode (for screenshots) ----------------------------------------------
+function shotParams() {
+  const q = new URLSearchParams(location.search);
   return {
-    photos,
-    // Hero crop centres on the faces; panel crops use each photo's
-    // face zone (fix round 2, item 5) so heads are never cut.
-    // hero-real faces: younger man centre ~(0.53, 0.62), bearded man
-    // ~(0.73, 0.27) — crop x 0.55 + SP_HERO_FRAME dx per size centres
-    // the pair in the free right zone; focus.x > 0.5 flips panels left.
-    hero: { photo: 0, crop: { x: 0.55, y: 0.5, scale: 1.0, rot: 0 } },
-    panels: [1, 2, 3].map((p, i) => ({
-      photo: p,
-      crop: { x: 0.5, y: spFaceY(photos[p]), scale: 1, rot: 0 },
-      label: SP_DEFAULT_LABELS[i],
-    })),
-    style: 'sunset',
-    size: 'square',
-    title: 'SUNSET HEIST',
-    subtitle: 'VICE CITY · TONIGHT',
-    tagline: 'One last job.',
-    focus: { x: 0.68, y: 0.45 },
-    // Fix round 8: per-size title height (fraction of canvas height,
-    // + = down). Defaults clear the real-photo hero's low front face:
-    // square +0.03 (his chin grazed the wordmark), portrait +0.16
-    // (his eyes sat behind it), wide +0.01 (fix round 9: with the
-    // ~5% smaller wide wordmark, 1% lower clears his chin without
-    // pushing the tagline into the footer).
-    titleY: { square: 0.03, portrait: 0.16, wide: 0.01 },
-    // Fix round 9: panel side — 'auto' (default, focus rule: the side
-    // that does not cover the subject), 'left', 'right' or 'off'.
-    // Explicit sides fix photos with faces on both sides, where the
-    // focus rule picks the wrong one (heist-duo square, group-night).
-    panelsSide: 'auto',
-    // Sunset backdrop OFF by default (fix round 4, item 2): the hero is
-    // one full photo; the procedural skyline is opt-in via the toggle.
-    backdrop: false,
+    shot: q.get('shot') || '',
+    photo: q.get('photo') || '',
+    caption: q.get('caption') || '',
+    size: q.get('size') || '',
+    panels: q.get('panels') || '',
+    titleLift: q.get('titley'),
+    backdrop: q.get('backdrop'),
   };
 }
 
-const spState = spDefaultState();
-const spImgMap = new Map();
-let spSelected = 'hero'; // 'hero' or 0..2
-let spUndo = [];
-let spRedo = [];
-let spRenderTimer = null;
-let spSaveTimer = null;
-
-const $ = (id) => document.getElementById(id);
-const preview = $('preview');
-const pctx = preview.getContext('2d');
-
-function spStatus(msg) { $('status').textContent = msg; }
-
-function spSnapshot() {
-  return JSON.stringify(spState);
-}
-function spPushUndo() {
-  spUndo.push(spSnapshot());
-  if (spUndo.length > 40) spUndo.shift();
-  spRedo = [];
-}
-function spRestore(json) {
-  const s = JSON.parse(json);
-  for (const k of Object.keys(spState)) spState[k] = s[k];
-  spSyncInputs();
-  spScheduleRender();
-}
-function spSave() {
-  clearTimeout(spSaveTimer);
-  spSaveTimer = setTimeout(() => {
-    try { localStorage.setItem('sunsetpress-v1', spSnapshot()); } catch (e) { /* private mode */ }
-  }, 400);
-}
-
-async function spEnsureImages() {
-  const missing = spState.photos.filter((src) => !spImgMap.has(src));
-  await Promise.all(missing.map(async (src) => {
-    try { spImgMap.set(src, await spLoadImage(src)); }
-    catch (e) { console.warn('photo failed', src); }
-  }));
-}
-
-function spPreviewScale() {
-  const dims = SP_SIZES[spState.size];
-  // Fill the stage (fix round 4, item 7): the scale comes from the
-  // stage's own size, not a fixed 700 px cap — the poster grows to the
-  // biggest size that fits the stage, so the stage never sits half
-  // empty under a small poster. Capped so the bitmap stays sane.
-  const stage = document.querySelector('.stage');
-  const availW = Math.max(320, (stage ? stage.clientWidth : 900) - 44);
-  const availH = Math.max(320, window.innerHeight - 250);
-  const s = Math.min(availW / dims.w, availH / dims.h);
-  const cap = 1000 / Math.max(dims.w, dims.h);
-  return Math.min(s, cap);
-}
-
-function spLayoutPx() {
-  const dims = SP_SIZES[spState.size];
-  const scale = spPreviewScale();
-  const W = dims.w * scale;
-  const H = dims.h * scale;
-  // Fix round 5, item 1: same flip rule as the renderer — the overlay
-  // rects must sit where the panels actually are. Fix round 9: resolved
-  // through spResolvePanels, so the toggle/?panels= is honoured here too.
-  const panels = spResolvePanels(spState);
-  const L = spLayoutFor(spState.size, panels.flip,
-    (spState.titleY && spState.titleY[spState.size]) || 0, panels.off);
-  const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
-  return { W, H, hero: R(L.hero), supports: L.supports.map(R), title: R(L.title), footer: R(L.footer) };
-}
-
-async function spRenderPreview() {
-  await spEnsureImages();
-  await document.fonts.ready;
-  const { W, H } = spLayoutPx();
-  // Fix round 8: paint the preview at up to 2x the display scale
-  // (capped at export size) and draw it down — the panels were painted
-  // at the small preview size and read soft/blurry in the editor shot.
-  const renderScale = Math.min(spPreviewScale() * 2, 1);
-  const poster = spRenderPoster(spState, spState.size, renderScale, spImgMap);
-  preview.width = Math.round(W);
-  preview.height = Math.round(H);
-  pctx.clearRect(0, 0, preview.width, preview.height);
-  pctx.drawImage(poster, 0, 0, preview.width, preview.height);
-  spDrawOverlay();
-  spStatus('Ready — ' + spState.photos.length + ' photos · ' + (SP_STYLES[spState.style].label) + ' · ' + spState.size);
-}
-
-function spDrawOverlay() {
-  const { hero, supports } = spLayoutPx();
-  const rects = [hero, ...supports];
-  const sel = spSelected === 'hero' ? 0 : spSelected + 1;
-  const r = rects[sel];
-  if (!r) return;
-  pctx.save();
-  // The hero is the whole poster now (fix round 4, item 2), so a
-  // dashed rect around it would just frame the entire poster — draw
-  // only the subject-focus ring for the hero, and the dashed rect for
-  // the supporting panels.
-  if (spSelected !== 'hero') {
-    pctx.strokeStyle = '#ff2e88';
-    pctx.lineWidth = 2;
-    pctx.setLineDash([8, 6]);
-    pctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
-    pctx.setLineDash([]);
+async function runShotMode(p) {
+  document.body.classList.add('shot');
+  if (p.photo && (PHOTOS[p.photo] || p.photo.startsWith('samples/'))) {
+    state.photo = p.photo;
   }
-  // Subject-focus ring on the hero.
-  if (spSelected === 'hero') {
-    const fx = hero.x + spState.focus.x * hero.w;
-    const fy = hero.y + spState.focus.y * hero.h;
-    pctx.beginPath();
-    pctx.ellipse(fx, fy, 26, 20, 0, 0, Math.PI * 2);
-    pctx.strokeStyle = '#ff2e88';
-    pctx.lineWidth = 3;
-    pctx.stroke();
-    pctx.beginPath();
-    pctx.arc(fx, fy, 4, 0, Math.PI * 2);
-    pctx.fillStyle = '#ff2e88';
-    pctx.fill();
-  }
-  pctx.restore();
-}
+  if (p.caption) state.title = p.caption;
+  if (p.size && SIZES[p.size]) state.size = p.size;
+  if (p.panels && ['auto', 'left', 'right', 'off'].includes(p.panels)) state.panels = p.panels;
+  if (p.titleLift != null) state.titleLift = Number(p.titleLift) || 0;
+  if (p.backdrop != null) state.backdrop = p.backdrop === '1';
+  state.focus = null;
+  state.zoom = 1;
+  syncControls();
+  await renderStyleThumbs();
 
-function spScheduleRender() {
-  clearTimeout(spRenderTimer);
-  spRenderTimer = setTimeout(() => { spRenderPreview().catch(console.error); }, 120);
-  spSave();
-}
-
-/* ---- photo thumbs ---- */
-function spBuildThumbs() {
-  const box = $('photoThumbs');
-  box.innerHTML = '';
-  spState.photos.forEach((src, i) => {
-    const img = document.createElement('img');
-    img.src = src;
-    img.alt = 'photo ' + (i + 1);
-    img.title = 'Use this photo for the selected panel';
-    img.addEventListener('click', () => {
-      spPushUndo();
-      if (spSelected === 'hero') {
-        spState.hero.photo = i;
-        // Re-centre the hero crop on the new photo's faces (item 5).
-        spState.hero.crop.y = spFaceY(spState.photos[i]);
-        spState.focus.y = spFaceY(spState.photos[i]);
-      } else {
-        spState.panels[spSelected].photo = i;
-        spState.panels[spSelected].crop.y = spFaceY(spState.photos[i]);
-      }
-      spBuildThumbs();
-      spBuildStrip();
-      spScheduleRender();
-    });
-    const used = spSelected === 'hero' ? spState.hero.photo === i
-      : spState.panels[spSelected] && spState.panels[spSelected].photo === i;
-    if (used) img.classList.add('used');
-    box.appendChild(img);
-  });
-}
-
-function spBuildStrip() {
-  const strip = $('panelStrip');
-  strip.innerHTML = '';
-  const names = ['HERO', 'PANEL 1', 'PANEL 2', 'PANEL 3'];
-  const descs = ['the big subject', 'supporting', 'supporting', 'supporting'];
-  names.forEach((name, i) => {
-    const key = i === 0 ? 'hero' : i - 1;
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'panel-chip' + (spSelected === key ? ' on' : '');
-    b.innerHTML = name + '<small>' + descs[i] + '</small>';
-    b.addEventListener('click', () => {
-      spSelected = key;
-      spBuildThumbs();
-      spBuildStrip();
-      spRenderPreview().catch(console.error);
-    });
-    strip.appendChild(b);
-  });
-}
-
-/* ---- style cards: live mini renders of the current photos ---- */
-async function spBuildStyles() {
-  const box = $('styleCards');
-  box.innerHTML = '';
-  await spEnsureImages();
-  for (const name of Object.keys(SP_STYLES)) {
-    const st = SP_STYLES[name];
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'style-card' + (spState.style === name ? ' on' : '');
-    const thumb = spRenderPoster({ ...spState, style: name }, 'square', 0.14, spImgMap);
-    thumb.style.width = '100%';
-    card.appendChild(thumb);
-    const lab = document.createElement('span');
-    lab.textContent = st.label;
-    card.appendChild(lab);
-    card.addEventListener('click', () => {
-      if (spState.style === name) return;
-      spPushUndo();
-      spState.style = name;
-      spBuildStyles();
-      spScheduleRender();
-    });
-    box.appendChild(card);
-  }
-}
-
-function spBuildLabels() {
-  const box = $('labelInputs');
-  box.innerHTML = '';
-  spState.panels.forEach((p, i) => {
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.maxLength = 14;
-    inp.value = p.label;
-    inp.placeholder = SP_DEFAULT_LABELS[i];
-    inp.addEventListener('change', () => {
-      spPushUndo();
-      spState.panels[i].label = inp.value.trim().toUpperCase() || SP_DEFAULT_LABELS[i];
-      spScheduleRender();
-    });
-    box.appendChild(inp);
-  });
-}
-
-function spSyncInputs() {
-  $('titleInput').value = spState.title;
-  $('subtitleInput').value = spState.subtitle;
-  $('taglineInput').value = spState.tagline;
-  $('backdropToggle').checked = !!spState.backdrop;
-  // Fix round 8: the title-height slider follows the current size.
-  const ty = spState.titleY || {};
-  const cur = ty[spState.size] == null ? 0 : ty[spState.size];
-  $('titleYInput').value = Math.round(cur * 100);
-  // Fix round 9: the readout is just the value now — the field label
-  // above already says "Title height" (was duplicated: "Title height"
-  // label + "Title height: 0%" readout).
-  $('titleYNote').textContent = (cur > 0 ? '+' : '') + Math.round(cur * 100) + '%';
-  spSyncPanelsTabs();
-  spBuildLabels();
-  spBuildStrip();
-  spBuildThumbs();
-  document.querySelectorAll('#sizeTabs button').forEach((b) => {
-    b.classList.toggle('on', b.dataset.size === spState.size);
-  });
-}
-
-/* ---- export ---- */
-function spDownload(blob, name) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
-async function spExportPNG(sizeName) {
-  await spEnsureImages();
-  await document.fonts.ready;
-  const poster = spRenderPoster(spState, sizeName, 1, spImgMap);
-  const dims = SP_SIZES[sizeName];
-  if (poster.width !== dims.w || poster.height !== dims.h) {
-    throw new Error('export size mismatch: ' + poster.width + 'x' + poster.height + ' != ' + dims.w + 'x' + dims.h);
-  }
-  return new Promise((resolve, reject) => {
-    poster.toBlob((blob) => {
-      if (!blob) return reject(new Error('toBlob failed'));
-      spDownload(blob, 'sunset-press-' + sizeName + '.png');
-      const fr = new FileReader();
-      fr.onload = () => resolve(fr.result);
-      fr.onerror = () => reject(new Error('read failed'));
-      fr.readAsDataURL(blob);
-    }, 'image/png');
-  });
-}
-
-/* ---- pointer interaction: pan crop, zoom crop, drag focus ---- */
-function spEventPos(e) {
-  const r = preview.getBoundingClientRect();
-  const sx = preview.width / r.width;
-  const sy = preview.height / r.height;
-  return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
-}
-
-let spDrag = null;
-preview.addEventListener('pointerdown', (e) => {
-  const pos = spEventPos(e);
-  const { hero, supports } = spLayoutPx();
-  preview.setPointerCapture(e.pointerId);
-  if (spSelected === 'hero') {
-    const fx = hero.x + spState.focus.x * hero.w;
-    const fy = hero.y + spState.focus.y * hero.h;
-    if (Math.hypot(pos.x - fx, pos.y - fy) < 34) {
-      spDrag = { mode: 'focus' };
-      return;
+  if (p.shot === 'cover') {
+    // Full-frame cover: the canvas is the whole viewport.
+    document.body.classList.add('shot-cover');
+    const stage = $('shotStage');
+    const canvas = await renderCover(state, state.size);
+    canvas.id = 'shotCanvas';
+    if (stage) {
+      stage.innerHTML = '';
+      stage.appendChild(canvas);
     }
-  }
-  const rects = [hero, ...supports];
-  let hit = -1;
-  rects.forEach((r, i) => {
-    if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) hit = i;
-  });
-  if (hit >= 0) {
-    spSelected = hit === 0 ? 'hero' : hit - 1;
-    spBuildThumbs();
-    spBuildStrip();
-    spDrag = { mode: 'pan', x: pos.x, y: pos.y };
-    spRenderPreview().catch(console.error);
-  }
-});
-preview.addEventListener('pointermove', (e) => {
-  if (!spDrag) return;
-  const pos = spEventPos(e);
-  if (spDrag.mode === 'focus') {
-    const { hero } = spLayoutPx();
-    spState.focus.x = Math.max(0.08, Math.min(0.92, (pos.x - hero.x) / hero.w));
-    spState.focus.y = Math.max(0.08, Math.min(0.92, (pos.y - hero.y) / hero.h));
-    spScheduleRender();
+    window.__shotReady = true;
     return;
   }
-  const { hero, supports } = spLayoutPx();
-  const rects = [hero, ...supports];
-  const sel = spSelected === 'hero' ? 0 : spSelected + 1;
-  const r = rects[sel];
-  const crop = spSelected === 'hero' ? spState.hero.crop : spState.panels[spSelected].crop;
-  crop.x = Math.max(0, Math.min(1, crop.x - (pos.x - spDrag.x) / (r.w * 0.9)));
-  crop.y = Math.max(0, Math.min(1, crop.y - (pos.y - spDrag.y) / (r.h * 0.9)));
-  spDrag.x = pos.x;
-  spDrag.y = pos.y;
-  spScheduleRender();
-});
-preview.addEventListener('pointerup', () => {
-  if (spDrag && spDrag.mode !== 'focus') spPushUndo();
-  if (spDrag && spDrag.mode === 'focus') spPushUndo();
-  spDrag = null;
-});
-preview.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const crop = spSelected === 'hero' ? spState.hero.crop : spState.panels[spSelected].crop;
-  crop.scale = Math.max(1, Math.min(4, crop.scale * Math.exp(-e.deltaY * 0.0012)));
-  spScheduleRender();
-}, { passive: false });
-
-/* Drag-and-drop photos anywhere on the page. */
-window.addEventListener('dragover', (e) => e.preventDefault());
-window.addEventListener('drop', (e) => {
-  e.preventDefault();
-  const files = [...(e.dataTransfer.files || [])].filter((f) => f.type.startsWith('image/'));
-  if (files.length) spAddFiles(files);
-});
-function spAddFiles(files) {
-  spPushUndo();
-  for (const f of files) {
-    const url = URL.createObjectURL(f);
-    spState.photos.push(url);
-  }
-  spBuildThumbs();
-  spScheduleRender();
+  // Editor shot: the normal editor, fully rendered.
+  await renderPreview();
+  window.__shotReady = true;
 }
 
-/* ---- shot params: ?shot=cover|editor|portrait|wide&style=&photos=&title=&subtitle=&tagline=&size= ---- */
-function spApplyShotParams() {
-  const q = new URLSearchParams(location.search);
-  if (q.get('photos')) {
-    const list = q.get('photos').split(',').map((s) => s.trim()).filter(Boolean)
-      .map((s) => (s.includes('/') || s.startsWith('blob:') ? s : 'samples/' + s));
-    if (list.length) {
-      spState.photos = list;
-      spState.hero.photo = 0;
-      spState.panels = [1, 2, 3].map((p, i) => ({
-        photo: Math.min(p, list.length - 1),
-        crop: { x: 0.5, y: spFaceY(list[Math.min(p, list.length - 1)]), scale: 1, rot: 0 },
-        label: SP_DEFAULT_LABELS[i],
-      }));
-    }
+// ---- boot ---------------------------------------------------------------------
+async function init() {
+  const p = shotParams();
+  pushHistory();
+  bindControls();
+  syncControls();
+  await waitForFonts();
+  if (p.shot) {
+    await runShotMode(p);
+    return;
   }
-  if (q.get('style') && SP_STYLES[q.get('style')]) spState.style = q.get('style');
-  if (q.get('title')) spState.title = q.get('title').toUpperCase();
-  if (q.get('subtitle')) spState.subtitle = q.get('subtitle').toUpperCase();
-  if (q.get('tagline') !== null) spState.tagline = q.get('tagline');
-  if (q.get('size') && SP_SIZES[q.get('size')]) spState.size = q.get('size');
-  // Backdrop toggle (fix round 4, item 2): off by default; ?backdrop=1
-  // forces the old skyline composition on for a test shot.
-  if (q.get('backdrop') !== null) spState.backdrop = q.get('backdrop') === '1';
-  const shot = q.get('shot');
-  if (shot === 'portrait') spState.size = 'portrait';
-  if (shot === 'wide') spState.size = 'wide';
-  if (shot === 'cover' || shot === 'editor') spState.size = spState.size || 'square';
-  // Fix round 9: ?panels=auto|left|right|off overrides the panel side
-  // for the current state (shot params use it to pin the side that
-  // keeps every face visible).
-  if (q.get('panels') && ['auto', 'left', 'right', 'off'].includes(q.get('panels'))) {
-    spState.panelsSide = q.get('panels');
-  }
-  // Fix round 8: ?titley=+0.16 overrides the title height for the
-  // current size (fraction of canvas height, + = down).
-  if (q.get('titley') !== null) {
-    if (!spState.titleY) spState.titleY = { square: 0, portrait: 0, wide: 0 };
-    spState.titleY[spState.size] = parseFloat(q.get('titley')) || 0;
-  }
+  await renderStyleThumbs();
+  await renderPreview();
+  window.__shotReady = true;
 }
 
-/* ---- wire the controls ---- */
-$('fileInput').addEventListener('change', (e) => {
-  spAddFiles([...e.target.files]);
-  e.target.value = '';
-});
-$('sampleBtn').addEventListener('click', () => {
-  spPushUndo();
-  const pool = SP_SAMPLES.filter((s) => s !== spState.photos[spState.hero.photo]);
-  spState.hero.photo = spState.photos.indexOf(pool[Math.floor(Math.random() * pool.length)]);
-  if (spState.hero.photo < 0) {
-    spState.photos.push(pool[0]);
-    spState.hero.photo = spState.photos.length - 1;
-  }
-  spBuildThumbs();
-  spScheduleRender();
-});
-$('titleInput').addEventListener('input', (e) => { spState.title = e.target.value.toUpperCase(); spScheduleRender(); });
-$('titleInput').addEventListener('change', () => spPushUndo());
-$('backdropToggle').addEventListener('change', (e) => {
-  spPushUndo();
-  spState.backdrop = e.target.checked;
-  spScheduleRender();
-});
-$('subtitleInput').addEventListener('input', (e) => { spState.subtitle = e.target.value.toUpperCase(); spScheduleRender(); });
-$('subtitleInput').addEventListener('change', () => spPushUndo());
-$('taglineInput').addEventListener('input', (e) => { spState.tagline = e.target.value; spScheduleRender(); });
-$('taglineInput').addEventListener('change', () => spPushUndo());
-/* Fix round 8: title-height slider — moves the title (and the footer
- * riding with it) for the current size only, so any photo's face can
- * be cleared without touching the other sizes. */
-$('titleYInput').addEventListener('input', (e) => {
-  if (!spState.titleY) spState.titleY = { square: 0, portrait: 0, wide: 0 };
-  const cur = parseInt(e.target.value, 10) / 100;
-  spState.titleY[spState.size] = cur;
-  $('titleYNote').textContent = (cur > 0 ? '+' : '') + Math.round(cur * 100) + '%';
-  spScheduleRender();
-});
-$('titleYInput').addEventListener('change', () => spPushUndo());
-/* Fix round 9: panels side control — Auto (focus rule), Left, Right,
- * Off. The default (Auto) picks the side that does not cover the
- * subject; explicit sides fix photos with faces on both sides. */
-function spSyncPanelsTabs() {
-  const cur = spState.panelsSide || 'auto';
-  document.querySelectorAll('#panelsTabs button').forEach((b) => {
-    b.classList.toggle('on', b.dataset.panels === cur);
-  });
-}
-document.querySelectorAll('#panelsTabs button').forEach((b) => {
-  b.addEventListener('click', () => {
-    if (spState.panelsSide === b.dataset.panels) return;
-    spPushUndo();
-    spState.panelsSide = b.dataset.panels;
-    spSyncPanelsTabs();
-    spScheduleRender();
-  });
-});
-document.querySelectorAll('#sizeTabs button').forEach((b) => {
-  b.addEventListener('click', () => {
-    if (spState.size === b.dataset.size) return;
-    spPushUndo();
-    spState.size = b.dataset.size;
-    spSyncInputs();
-    spScheduleRender();
-  });
-});
-$('exportBtn').addEventListener('click', async () => {
-  $('exportNote').textContent = 'Rendering ' + spState.size + '…';
-  try {
-    await spExportPNG(spState.size);
-    $('exportNote').textContent = 'Exported sunset-press-' + spState.size + '.png — exact size, nothing uploaded.';
-  } catch (err) {
-    $('exportNote').textContent = 'Export failed: ' + err.message;
-  }
-});
-/* One-click cover (fix round, item 6): the single obvious entry point.
- * Picks a fresh style, renders, and exports the current size. */
-$('makeCoverBtn').addEventListener('click', async () => {
-  spPushUndo();
-  const names = Object.keys(SP_STYLES).filter((n) => n !== spState.style);
-  spState.style = names[Math.floor(Math.random() * names.length)];
-  spBuildStyles();
-  await spRenderPreview();
-  $('exportNote').textContent = 'Making your cover…';
-  try {
-    await spExportPNG(spState.size);
-    $('exportNote').textContent = 'Your cover is ready — ' + spState.title + ' (' + spState.size + ', exact PNG).';
-  } catch (err) {
-    $('exportNote').textContent = 'Export failed: ' + err.message;
-  }
-});
-$('exportAllBtn').addEventListener('click', async () => {
-  $('exportNote').textContent = 'Rendering all 3 sizes…';
-  try {
-    for (const s of ['square', 'portrait', 'wide']) {
-      await spExportPNG(s);
-      await new Promise((r) => setTimeout(r, 350));
-    }
-    $('exportNote').textContent = 'Exported all 3 sizes — exact PNGs, nothing uploaded.';
-  } catch (err) {
-    $('exportNote').textContent = 'Export failed: ' + err.message;
-  }
-});
-$('shuffleBtn').addEventListener('click', () => {
-  spPushUndo();
-  const names = Object.keys(SP_STYLES).filter((n) => n !== spState.style);
-  spState.style = names[Math.floor(Math.random() * names.length)];
-  spBuildStyles();
-  spScheduleRender();
-});
-$('undoBtn').addEventListener('click', () => {
-  if (!spUndo.length) return;
-  spRedo.push(spSnapshot());
-  spRestore(spUndo.pop());
-});
-$('redoBtn').addEventListener('click', () => {
-  if (!spRedo.length) return;
-  spUndo.push(spSnapshot());
-  spRestore(spRedo.pop());
-});
-window.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); $('undoBtn').click(); }
-  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); $('redoBtn').click(); }
-  if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT') { $('shuffleBtn').click(); }
-});
-
-/* ---- boot ---- */
-window.__sp = {
-  state: spState,
-  imgMap: spImgMap,
-  render: () => spRenderPreview(),
-  exportPNG: (size) => spExportPNG(size),
-  setStyle: (name) => { spState.style = name; spBuildStyles(); spScheduleRender(); },
-  setSize: (name) => { spState.size = name; spSyncInputs(); spScheduleRender(); },
-  ready: null,
-};
-
-window.__sp.ready = (async () => {
-  spStatus('Loading fonts…');
-  try {
-    await Promise.all([
-      document.fonts.load('100px Anton'),
-      document.fonts.load('40px "Bebas Neue"'),
-    ]);
-  } catch (e) { console.warn('font load', e); }
-  await document.fonts.ready;
-  spApplyShotParams();
-  try {
-    const saved = localStorage.getItem('sunsetpress-v1');
-    if (saved && !location.search) {
-      const s = JSON.parse(saved);
-      for (const k of Object.keys(spState)) if (s[k] !== undefined) spState[k] = s[k];
-    }
-  } catch (e) { /* corrupted save: ignore */ }
-  spSyncInputs();
-  await spEnsureImages();
-  await spRenderPreview();
-  await spBuildStyles();
-  spStatus('Ready — drag a photo, pick a style, export.');
-})();
+init();

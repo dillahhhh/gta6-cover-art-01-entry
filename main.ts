@@ -1,23 +1,19 @@
-// SUNSET PRESS — the entry program (Node 22, standard library only).
-// It hands the app in: copy app/ and screenshots/ from beside this file to
-// the output directory, write /output/dossier.json with the vendored make.fun
-// library, then prove the hand-in is sound: rebuild the dossier from the
-// output itself and refuse to finish unless the two byte streams match, and
-// print every output file with its size so a bad copy is visible at once.
-// Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// main.ts — SUNSET PRESS hand-in (Node 22, standard library only).
+// The program copies the app and its screenshots into the output directory and
+// writes the dossier the judge reads, using the kit's vendored library.
+// Run locally with:  mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
 
-const ENTRY_NAME = 'sunset-press';
+const repoRoot = fileURLToPath(new URL('.', import.meta.url));
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
-
-const DOSSIER_CAPS = {
+// The scorer's own caps for this competition: the dossier text cap shapes the
+// bytes; the rest refuse an entry the scorer would refuse outright.
+const DOSSIER = {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   app_max_files: 993,
@@ -25,58 +21,46 @@ const DOSSIER_CAPS = {
   app_path_max_bytes: 1000,
 };
 
-/** Every file under a directory, paths relative to it, in code-unit order. */
-function listFiles(dir, base = '') {
-  const found = [];
-  for (const entry of readdirSync(join(dir, base), { withFileTypes: true })) {
-    const rel = base === '' ? entry.name : `${base}/${entry.name}`;
-    if (entry.isDirectory()) found.push(...listFiles(dir, rel));
-    else if (entry.isFile()) found.push(rel);
-  }
-  return found.sort();
-}
-
-/** A screenshot over its byte cap fails the gate, so fail here first. */
-function checkShotSizes(dir) {
-  const cap = DOSSIER_CAPS.screenshots.max_bytes;
-  for (const rel of listFiles(dir)) {
-    const bytes = statSync(join(dir, rel)).size;
-    if (bytes > cap) {
-      throw new Error(`screenshots/${rel} is ${bytes} bytes, over the ${cap} byte cap: re-export it smaller`);
+function countTree(dir) {
+  let files = 0;
+  let bytes = 0;
+  for (const name of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, name.name);
+    if (name.isDirectory()) {
+      const sub = countTree(path);
+      files += sub.files;
+      bytes += sub.bytes;
+    } else if (name.isFile()) {
+      files += 1;
+      bytes += statSync(path).size;
     }
   }
+  return { files, bytes };
 }
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'app'), join(out, 'app'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) {
-  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+function handIn() {
+  mkdirSync(outDir, { recursive: true });
+
+  // The app itself: every static file under app/ (index, modules, fonts, samples).
+  const appDir = join(repoRoot, 'app');
+  cpSync(appDir, join(outDir, 'app'), { recursive: true });
+  const appCount = countTree(appDir);
+
+  // The screenshots: the first by name is the cover the judge leads with.
+  const shotsDir = join(outDir, 'screenshots');
+  mkdirSync(shotsDir, { recursive: true });
+  const shotsSrc = join(repoRoot, 'screenshots');
+  let shotNames = [];
+  if (existsSync(shotsSrc)) {
+    cpSync(shotsSrc, shotsDir, { recursive: true });
+    shotNames = readdirSync(shotsSrc).filter((n) => !n.startsWith('.')).sort();
+  }
+
+  writeFileSync(join(outDir, 'dossier.json'), buildDossier(outDir, DOSSIER));
+  console.log(
+    `SUNSET PRESS handed in: app/ ${appCount.files} files (${appCount.bytes} bytes), ` +
+    `screenshots ${shotNames.join(', ') || '(none)'}, dossier written.`,
+  );
 }
 
-// The dossier, written once from the output directory.
-const dossier = buildDossier(out, DOSSIER_CAPS);
-writeFileSync(join(out, 'dossier.json'), dossier);
-
-// Verification, new in this program: build the dossier a second time from
-// the finished output and compare bytes. A copy that lost a file, a
-// screenshot over its cap or a non-deterministic dossier fails here, loudly,
-// instead of reaching the scorer.
-const rebuilt = buildDossier(out, DOSSIER_CAPS);
-if (Buffer.compare(Buffer.from(dossier), Buffer.from(rebuilt)) !== 0) {
-  throw new Error('dossier.json is not what buildDossier writes from the output: refusing to hand in');
-}
-
-// A manifest of everything handed in, so the run log shows the entry's shape.
-const manifest = listFiles(out).map((rel) => {
-  const bytes = statSync(join(out, rel)).size;
-  return `${rel} (${bytes} bytes)`;
-});
-const shotCount = listFiles(join(out, 'screenshots')).length;
-if (shotCount < 3 || shotCount > 4) {
-  throw new Error(`screenshots/ holds ${shotCount} images: the entry needs 3 or 4`);
-}
-checkShotSizes(join(out, 'screenshots'));
-console.log(`${ENTRY_NAME}: ${manifest.length} files handed in`);
-for (const line of manifest) console.log(`  ${line}`);
-console.log(`dossier.json verified: ${dossier.length} bytes, identical on rebuild`);
+handIn();

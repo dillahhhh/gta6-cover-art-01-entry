@@ -1,89 +1,146 @@
 #!/usr/bin/env python3
-"""Take SUNSET PRESS screenshots per shots.json (fix round 4).
+"""SUNSET PRESS screenshot runner (round 4 rebuild).
 
-Cover shots (cover/portrait/wide) come from __sp.exportPNG (exact-size
-PNG) resized to the shots.json dimensions and saved as JPEG.
-The editor shot is a full-page screenshot.
-Also verifies the 3 export PNG sizes and reports console errors.
+Serves app/ with the repo's own serve.ts, opens each shots.json scene in headless
+Chromium, waits for the app to flag window.__shotReady, and saves a JPEG.
+Then it verifies the gate's screenshot limits and the app's three PNG exports.
+Usage: python3 shots4.py [--port 8901] [--skip-exports]
 """
-import base64
-import io
 import json
 import os
+import subprocess
 import sys
+import time
+import urllib.request
 
-from PIL import Image
-from playwright.sync_api import sync_playwright
+REPO = os.path.dirname(os.path.abspath(__file__))
+SHOTS = os.path.join(REPO, "shots.json")
+OUT = os.path.join(REPO, "screenshots")
+PORT = 8901
 
-ROOT = os.path.expanduser('~/workspace/makefun/gta6-cover-art-01-entry')
-SHOTS = json.load(open(os.path.join(ROOT, 'shots.json')))
-BASE = 'http://localhost:8080/'
+MAX_BYTES = 262144
+MAX_LONG = 1280
+MIN_SHORT = 480
+EXPORT_SIZES = [(1080, 1080), (1080, 1350), (1920, 1080)]
 
 
-def save_jpeg(img, path, max_bytes=262144):
-    q = 90
-    while q >= 40:
-        buf = io.BytesIO()
-        img.save(buf, 'JPEG', quality=q)
-        if len(buf.getvalue()) <= max_bytes or q == 40:
-            open(path, 'wb').write(buf.getvalue())
-            return len(buf.getvalue()), q
-        q -= 6
-    return len(buf.getvalue()), q
+def wait_for_server(port, timeout=20):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            time.sleep(0.3)
+    return False
+
+
+def check_shot(path, expect_w, expect_h):
+    from PIL import Image
+    problems = []
+    size = os.path.getsize(path)
+    if size > MAX_BYTES:
+        problems.append(f"{size} bytes > {MAX_BYTES} cap")
+    with Image.open(path) as im:
+        w, h = im.size
+        if max(w, h) > MAX_LONG:
+            problems.append(f"long side {max(w, h)} > {MAX_LONG}")
+        if min(w, h) < MIN_SHORT:
+            problems.append(f"short side {min(w, h)} < {MIN_SHORT}")
+        if (w, h) != (expect_w, expect_h):
+            problems.append(f"size {w}x{h}, expected {expect_w}x{expect_h}")
+    return problems
 
 
 def main():
-    only = sys.argv[1:] or None
+    skip_exports = "--skip-exports" in sys.argv
+    port = PORT
+    if "--port" in sys.argv:
+        port = int(sys.argv[sys.argv.index("--port") + 1])
+
+    with open(SHOTS, encoding="utf-8") as f:
+        shots = json.load(f)
+    os.makedirs(OUT, exist_ok=True)
+
+    server = subprocess.Popen(
+        ["node", "serve.ts", "--port", str(port)],
+        cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
     errors = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        ctx = browser.new_context(accept_downloads=True)
-        ctx.set_default_timeout(120000)
-        page = ctx.new_page()
-        page.on('console', lambda m: errors.append(f'console.{m.type}: {m.text}') if m.type == 'error' else None)
-        page.on('pageerror', lambda e: errors.append(f'pageerror: {e}'))
-        for shot in SHOTS:
-            if only and shot['name'] not in only:
-                continue
-            page.set_viewport_size({'width': shot['w'], 'height': shot['h']})
-            page.goto(BASE + shot['query'])
-            # evaluate() awaits the __sp.ready promise: fonts loaded,
-            # photos loaded, first preview + style thumbs rendered.
-            page.evaluate('window.__sp.ready')
-            page.wait_for_timeout(400)
-            out = os.path.join(ROOT, 'screenshots', shot['name'])
-            if 'shot=editor' in shot['query']:
-                page.screenshot(path='/tmp/editor-raw.png', full_page=False)
-                img = Image.open('/tmp/editor-raw.png').convert('RGB')
-                n, q = save_jpeg(img, out)
-                print(f"{shot['name']}: editor full-page {img.size} -> {n} B q={q}")
-            else:
-                size = {'cover': 'square', 'portrait': 'portrait', 'wide': 'wide'}
-                q = shot['query']
-                size_name = 'portrait' if 'portrait' in q else ('wide' if 'wide' in q else 'square')
-                data_url = page.evaluate(f"window.__sp.exportPNG('{size_name}')")
-                raw = base64.b64decode(data_url.split(',', 1)[1])
-                img = Image.open(io.BytesIO(raw)).convert('RGB')
-                print(f"{shot['name']}: export {size_name} PNG {img.size}")
-                if img.size != (shot['w'], shot['h']):
-                    img = img.resize((shot['w'], shot['h']), Image.LANCZOS)
-                n, qq = save_jpeg(img, out)
-                print(f"{shot['name']}: saved {img.size} -> {n} B q={qq} {'OK' if n <= 262144 else 'OVER'}")
-        # Export size verification for all 3 sizes (square page)
-        page.set_viewport_size({'width': 1280, 'height': 900})
-        page.goto(BASE + '?shot=cover&photos=heist-duo.jpg,selfie-day.jpg,friends-day.jpg,group-night.jpg&style=sunset&title=SUNSET%20HEIST&subtitle=VICE%20CITY%20%C2%B7%20TONIGHT&tagline=One%20last%20job.&size=square')
-        page.evaluate('window.__sp.ready')
-        for size_name, expect in [('square', (1080, 1080)), ('portrait', (1080, 1350)), ('wide', (1920, 1080))]:
-            data_url = page.evaluate(f"window.__sp.exportPNG('{size_name}')")
-            raw = base64.b64decode(data_url.split(',', 1)[1])
-            img = Image.open(io.BytesIO(raw))
-            ok = 'OK' if img.size == expect else 'MISMATCH'
-            print(f"export {size_name}: {img.size} expected {expect} {ok}")
-        browser.close()
-    print('CONSOLE ERRORS:' if errors else 'CONSOLE: no errors')
-    for e in errors:
-        print(' ', e)
+    try:
+        if not wait_for_server(port):
+            print("FATAL: serve.ts did not come up")
+            return 1
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(args=["--no-sandbox", "--disable-gpu"])
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            console_errors = []
+            page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
+            page.on("pageerror", lambda e: console_errors.append(str(e)))
+
+            for shot in shots:
+                name = shot["name"]
+                url = f"http://127.0.0.1:{port}/{shot['query']}"
+                page.set_viewport_size({"width": shot["w"], "height": shot["h"]})
+                page.goto(url, wait_until="load")
+                try:
+                    page.wait_for_function("window.__shotReady === true", timeout=90000)
+                except Exception:
+                    errors.append(f"{name}: __shotReady never fired")
+                    continue
+                page.wait_for_timeout(400)
+                path = os.path.join(OUT, name)
+                page.screenshot(path=path, type="jpeg", quality=85)
+                problems = check_shot(path, shot["w"], shot["h"])
+                if problems:
+                    errors.append(f"{name}: " + "; ".join(problems))
+                else:
+                    print(f"OK {name} ({os.path.getsize(path)} bytes)")
+                if console_errors:
+                    errors.append(f"{name}: console errors: {console_errors[:3]}")
+                    console_errors = []
+
+            if not skip_exports:
+                # Verify the app's own single-size Export PNG at each exact size
+                # (one download per click; three parallel expect_downloads all
+                # catch the same first download, so they are done sequentially).
+                page.set_viewport_size({"width": 1280, "height": 900})
+                page.goto(f"http://127.0.0.1:{port}/", wait_until="load")
+                page.wait_for_function("window.__shotReady === true", timeout=90000)
+                got = set()
+                for name, size in [("square", (1080, 1080)), ("portrait", (1080, 1350)), ("wide", (1920, 1080))]:
+                    page.select_option("#exportSize", name)
+                    with page.expect_download() as dl_info:
+                        page.click("#exportOneBtn")
+                    dl = dl_info.value
+                    tmp = os.path.join("/tmp", "sp-export-" + dl.suggested_filename)
+                    dl.save_as(tmp)
+                    from PIL import Image
+                    with Image.open(tmp) as im:
+                        got.add(im.size)
+                    print(f"OK export {dl.suggested_filename} {os.path.getsize(tmp)} bytes")
+                missing = [s for s in EXPORT_SIZES if s not in got]
+                if missing:
+                    errors.append(f"exports missing exact sizes: {missing} (got {sorted(got)})")
+            browser.close()
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=5)
+        except Exception:
+            server.kill()
+
+    if errors:
+        print("FAILURES:")
+        for e in errors:
+            print(" - " + e)
+        return 1
+    print("ALL SHOTS OK")
+    return 0
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    sys.exit(main())
