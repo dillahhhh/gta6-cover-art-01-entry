@@ -1,64 +1,52 @@
-# SUNSET PRESS — a GTA 6-style cover maker
+# SUNSET PRESS — one photo in, a full key-art poster out
 
-One photo in. A full key-art poster out.
-
-SUNSET PRESS is an offline browser web app that turns a person's photo and
-a caption into GTA 6-style cover art: a painted hero, a slanted three-panel
-stack (THE CREW / THE GETAWAY / THE SCORE), and a big gold-to-pink 3D title,
-exported as PNGs in the three common post sizes (1920×1080, 1080×1080,
-1080×1350). No network at runtime, no uploads — photos never leave the
-machine. Every file lives under `app/`.
+A web app that turns a person's photo and a caption into GTA-style cover art:
+one hero photo painted full-bleed, three slanted supporting panels (The Crew,
+The Getaway, The Score), and one huge gold-to-pink wordmark — exported as a
+PNG in the common post sizes 1080×1080, 1080×1350 and 1920×1080.
 
 ## How it works
 
-- **Painted look** (`app/src/paint.js`): a hand-written canvas pipeline —
-  gentle smoothing, luminance posterize with dithering (so skin never shows
-  contour bands), a gradient map (shadows deep violet, mids magenta/coral,
-  highlights peach/gold) blended back with the original photo, a
-  full-resolution Sobel ink outline, and fine uniform grain. No halftone
-  dot pattern, so the sky stays clean.
-- **Cover renderer** (`app/src/render.js`): per-size layout. The hero is
-  painted full-bleed; the panel stack sits on the left with neon pink
-  borders and pill labels; the title block is laid out **bottom-up from
-  the footer**, so the footer always keeps its margin and the kicker and
-  title can never drift up onto a face. That bottom-up layout is the fix
-  for the wide cover, where the title used to cover the front subject's
-  mouth and chin.
-- **Editor** (`app/src/ui.js`, `app/index.html`): pick a photo or tap a
-  sample, pick one of six poster styles, type the caption, switch sizes,
-  drag on the preview to move the subject focus, export one size or all
-  three. The subject-focus ring is a drag-only DOM overlay and never
-  appears in exports or in the editor screenshot.
+1. **Your photo** — pick a file from your machine or tap a sample. Photos are
+   read on your machine only, never uploaded.
+2. **Poster style** — six painted grades (Sunset, Neon Night, Teal Dusk, Warm
+   Crew, Golden Hour, Vice Nights), or shuffle for a surprise.
+3. **Caption** — type the title and kicker; move the title up or down.
+4. **Panels** — each supporting panel takes any sample photo, and the hero can
+   be panned (drag) and zoomed (scroll) right on the preview.
+5. **Export** — one size, or all three at once.
+
+The painted look is a hand-written canvas pipeline, no ML: the photo is
+smoothed into flat regions, its light is posterized into 10 levels and washed
+through a sunset gradient, a thin dark ink line is laid on the strong edges,
+and a little of the real photo is blended back so faces stay readable. Grain
+is kept very light on purpose.
 
 ## Run it
 
-```
-node serve.ts            # app/ on http://localhost:8080
-python3 shots4.py        # renders the 4 screenshots into screenshots/
+```sh
+node serve.ts            # serves app/ on http://localhost:8080
 ```
 
-## Hand it in
+No build step, no network at runtime: every script, font and sample photo is
+a file under `app/`. Screenshots are taken with `python3 shots4.py`.
 
-```
+## Hand in
+
+```sh
 mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-`main.ts` copies `app/` and `screenshots/` to the output directory and
-writes `dossier.json` with the vendored make.fun library
-(`vendor/makefun-app.ts`).
+`main.ts` copies `app/` and `screenshots/` to the output directory and writes
+`dossier.json` with the vendored make.fun library.
 
-## Photo credits
+## Credits
 
-- Hero photo (`app/samples/hero-real.jpg`): Jace Ulloa, via Unsplash —
-  two people at a lakeside at golden hour. Used as-is; not claimed as our
-  own.
-- The other sample photos in `app/samples/` are stand-ins shipped with
-  the app so the first screenshot is never empty.
+- Hero photo: two men at a lakeside at golden hour, by Jace Ulloa on Unsplash
+  (`app/samples/hero-real.jpg`). Used under the Unsplash licence.
+- Fonts: Anton and Bebas Neue, both under the SIL Open Font License
+  (`app/fonts/OFL.txt`).
+- The other sample photos are original illustrations/photos bundled with the
+  entry, free to use.
 
-## Notes
-
-- No Rockstar Games logo, wordmark, artwork, characters, or fonts are
-  used. The lettering is built from SIL OFL display faces bundled under
-  `app/fonts/` (Anton, Bebas Neue) and original shapes.
-- No ML, no model downloads, no CDN fonts, no remote images, no
-  analytics.
+Licence: MIT (see `LICENSE`).

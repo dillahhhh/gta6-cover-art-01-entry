@@ -1,139 +1,61 @@
-/* SUNSET PRESS editor — dark, neon-trimmed, matches the poster. */
-
+/* SUNSET PRESS — dark neon editor to match the poster. */
 @font-face {
   font-family: 'Anton';
-  src: url('fonts/Anton-Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
+  src: url('./fonts/Anton-Regular.ttf') format('truetype');
   font-display: swap;
 }
-
 @font-face {
   font-family: 'Bebas Neue';
-  src: url('fonts/BebasNeue-Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
+  src: url('./fonts/BebasNeue-Regular.ttf') format('truetype');
   font-display: swap;
 }
 
 * { box-sizing: border-box; }
-
 html, body { margin: 0; padding: 0; }
-
 body {
-  background: #150826;
-  color: #f2eaf7;
+  background: #14082a;
+  color: #f3e9ff;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   min-height: 100vh;
 }
 
-.topbar {
-  display: flex;
-  align-items: baseline;
-  gap: 18px;
-  padding: 14px 22px;
-  background: linear-gradient(90deg, #2a0a3a, #1a0530);
-  border-bottom: 1px solid #3d1560;
-}
-
 .brand {
-  font-family: 'Anton', sans-serif;
-  font-size: 30px;
+  padding: 18px 28px 8px;
+  border-bottom: 1px solid #2c1548;
+}
+.brand h1 {
+  margin: 0;
+  font-family: 'Anton', 'Arial Black', sans-serif;
+  font-size: 34px;
   letter-spacing: 1px;
-  background: linear-gradient(180deg, #ffd76a, #ff5e8a);
+  background: linear-gradient(180deg, #ffd76a, #ff4d8d);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
-
-.tagline {
-  color: #c9a8e0;
-  font-size: 14px;
-}
+.brand p { margin: 2px 0 0; color: #b9a3d6; font-size: 14px; }
 
 .layout {
   display: flex;
-  gap: 22px;
-  padding: 18px 22px 26px;
+  gap: 20px;
+  padding: 16px 28px 28px;
   align-items: flex-start;
 }
 
-.stage-col {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
-.preview-wrap {
-  position: relative;
-  background: #0c0318;
-  border: 1px solid #3d1560;
-  border-radius: 10px;
-  padding: 10px;
-  line-height: 0;
-}
-
+.stage { flex: 1 1 auto; min-width: 0; }
 #preview {
   display: block;
-  border-radius: 6px;
-  cursor: crosshair;
+  width: 100%;
+  max-width: 760px;
+  height: auto;
+  border: 2px solid #ff4d9d;
+  border-radius: 10px;
+  background: #0c0418;
+  cursor: grab;
   touch-action: none;
 }
-
-.focus-ring {
-  position: absolute;
-  width: 92px;
-  height: 60px;
-  border: 2px dashed #ffd76a;
-  border-radius: 50%;
-  pointer-events: none;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 14px rgba(255, 215, 106, 0.55);
-}
-
-.size-tabs {
-  display: flex;
-  gap: 8px;
-}
-
-.size-tab {
-  background: #241040;
-  color: #e8d5f5;
-  border: 1px solid #4a2270;
-  border-radius: 999px;
-  padding: 7px 14px;
-  font: 600 13px system-ui, sans-serif;
-  cursor: pointer;
-}
-
-.size-tab.active {
-  border-color: #ffd76a;
-  color: #ffd76a;
-  background: #33205a;
-}
-
-.export-row {
-  display: flex;
-  gap: 10px;
-}
-
-.export-btn {
-  background: linear-gradient(180deg, #ff5e8a, #e0266e);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 18px;
-  font: 700 14px system-ui, sans-serif;
-  cursor: pointer;
-}
-
-.export-btn.ghost {
-  background: #241040;
-  border: 1px solid #ff5e8a;
-  color: #ffb3cd;
-}
+#preview:active { cursor: grabbing; }
+.hint { color: #8f76b3; font-size: 12px; margin: 8px 0 0; }
 
 .controls {
   flex: 0 0 340px;
@@ -141,117 +63,131 @@ body {
   flex-direction: column;
   gap: 14px;
 }
-
 .card {
-  background: #1e0b33;
-  border: 1px solid #3d1560;
+  background: #1e0f38;
+  border: 1px solid #2c1548;
   border-radius: 12px;
   padding: 14px 16px;
 }
-
 .card h2 {
-  margin: 0 0 12px;
-  font-family: 'Bebas Neue', sans-serif;
-  font-size: 20px;
+  margin: 0 0 10px;
+  font-family: 'Bebas Neue', 'Arial Narrow', sans-serif;
+  font-size: 19px;
   letter-spacing: 2px;
   color: #ffd76a;
-  font-weight: 400;
 }
-
-.card h2 .step { color: #ff5e8a; }
-
-.choose-btn {
-  width: 100%;
-  background: #2c1548;
-  color: #f2eaf7;
-  border: 1px solid #5a2f86;
-  border-radius: 8px;
-  padding: 10px;
-  font: 600 14px system-ui, sans-serif;
-  cursor: pointer;
+.card h2 span { color: #ff4d9d; }
+.card label {
+  display: block;
+  font-size: 13px;
+  color: #cdbced;
   margin-bottom: 10px;
 }
-
-.sample-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.sample-thumb {
-  width: 62px;
-  height: 46px;
-  padding: 0;
-  border: 2px solid #4a2270;
-  border-radius: 6px;
-  overflow: hidden;
-  cursor: pointer;
-  background: #0c0318;
-}
-
-.sample-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.card label:last-child { margin-bottom: 0; }
+.card input[type="text"], .card select {
   display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #3a2060;
+  background: #2a1650;
+  color: #fff;
+  font-size: 14px;
 }
+.card input[type="range"] { display: block; width: 100%; margin-top: 6px; }
+.note { color: #8f76b3; font-size: 12px; margin: 8px 0 0; }
 
-.sample-thumb:hover { border-color: #ffd76a; }
-
-.hint {
-  color: #a98cc2;
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 10px 0 0;
+.file-btn {
+  display: block;
+  text-align: center;
+  padding: 10px;
+  border-radius: 8px;
+  background: #2a1650;
+  border: 1px solid #3a2060;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  margin-bottom: 10px;
 }
+.file-btn input { display: none; }
+
+.thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+.thumb {
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  background: none;
+  cursor: pointer;
+  width: 58px;
+  height: 44px;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.active { border-color: #ff4d9d; }
 
 .style-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
-}
-
-.style-btn {
-  background: #2c1548;
-  color: #e8d5f5;
-  border: 1px solid #4a2270;
-  border-radius: 8px;
-  padding: 9px 6px;
-  font: 600 13px system-ui, sans-serif;
-  cursor: pointer;
-}
-
-.style-btn.active {
-  border-color: #ffd76a;
-  color: #ffd76a;
-  background: #3a2364;
-}
-
-.style-btn.shuffle {
-  grid-column: 1 / -1;
-  border-style: dashed;
-  color: #ffb3cd;
-}
-
-.field-label {
-  display: block;
-  color: #c9a8e0;
-  font-size: 12px;
-  margin: 0 0 4px;
-}
-
-.field {
-  width: 100%;
-  background: #150826;
-  color: #f2eaf7;
-  border: 1px solid #4a2270;
-  border-radius: 8px;
-  padding: 9px 10px;
-  font: 600 14px system-ui, sans-serif;
   margin-bottom: 10px;
 }
+.style-btn, .size-btn {
+  padding: 9px 6px;
+  border-radius: 8px;
+  border: 1px solid #3a2060;
+  background: #2a1650;
+  color: #e9dcff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.style-btn.active, .size-btn.active {
+  background: #ff4d9d;
+  border-color: #ff4d9d;
+  color: #fff;
+}
+.size-tabs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.size-btn { text-align: left; padding: 9px 12px; }
 
-.field:focus {
-  outline: none;
-  border-color: #ffd76a;
+.wide-btn, .cta {
+  display: block;
+  width: 100%;
+  padding: 11px;
+  border-radius: 8px;
+  border: 1px solid #3a2060;
+  background: #2a1650;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.cta {
+  background: linear-gradient(180deg, #ffb347, #ff4d8d);
+  border: none;
+  font-weight: 700;
+  font-size: 16px;
+}
+#status { color: #8f76b3; font-size: 12px; margin: 6px 0 0; min-height: 15px; }
+
+/* Screenshot scene: cover alone, no editor chrome. */
+body.shot-cover .brand, body.shot-cover .controls, body.shot-cover .hint { display: none; }
+
+/* Screenshot scene: compact editor so it fits a 1280x720 viewport. */
+body.shot-editor { zoom: 0.76; }
+body.shot-editor .brand { padding: 8px 20px 4px; width: 1684px; }
+body.shot-editor .brand h1 { font-size: 24px; }
+body.shot-editor .layout { padding: 8px 20px 12px; gap: 14px; width: 1684px; }
+body.shot-editor #preview { max-width: 600px; }
+body.shot-editor .card { padding: 10px 12px; }
+body.shot-editor .controls { flex-basis: 320px; gap: 8px; }
+body.shot-cover { background: #0c0418; }
+body.shot-cover .layout { padding: 0; gap: 0; }
+body.shot-cover .stage { flex: 1; }
+body.shot-cover #preview {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+  border: none;
+  border-radius: 0;
 }

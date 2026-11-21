@@ -1,250 +1,279 @@
-// paint.js — "ink and paint" pipeline for SUNSET PRESS.
+// SUNSET PRESS — painted-look pipeline (hand-written canvas, no ML, no library).
 //
-// Turns an ordinary photo into flat painted regions with a thin ink outline,
-// all on canvas, no ML. The pipeline is:
-//   1. gentle smoothing (a cheap down/up blur) so flat areas read as paint;
-//   2. luminance posterize to N levels, with a whisper of dither so the steps
-//      never read as contour bands on skin;
-//   3. a gradient map (shadows deep violet, mids magenta/coral, highlights
-//      peach/gold) blended back with the original photo, so faces stay smooth
-//      and readable instead of going flat vector;
-//   4. a full-resolution Sobel ink outline (never a quarter-res edge field:
-//      that is what made 4x4 block artefacts on faces in an earlier round);
-//   5. fine uniform grain only — no halftone dot pattern, so the sky stays
-//      clean in the editor preview as well as in the export.
+// One photo in, one painted panel out. The look is "ink and paint": smooth the
+// photo into flat regions, posterize its light into a few levels, wash those
+// levels through a sunset gradient, lay a thin dark ink line on the strong
+// edges, then let a little of the real photo back in so faces stay readable.
+// Grain is kept very light on purpose: a clean painted surface, never sandpaper.
 //
-// Everything here is written for this round; nothing is copied from an
-// earlier build.
+// Locked render values (round 6, the best build so far): 10 posterize levels,
+// gradientMix 0.65, photoBlend 0.2, blur ~3 px at working scale.
 
-// A colour stop: [position 0..1, r, g, b].
-function rampAt(stops, t) {
-  if (t <= stops[0][0]) return [stops[0][1], stops[0][2], stops[0][3]];
-  for (let i = 1; i < stops.length; i++) {
-    if (t <= stops[i][0]) {
-      const [t0, r0, g0, b0] = stops[i - 1];
-      const [t1, r1, g1, b1] = stops[i];
-      const f = (t - t0) / (t1 - t0 || 1);
-      return [r0 + (r1 - r0) * f, g0 + (g1 - g0) * f, b0 + (b1 - b0) * f];
-    }
-  }
-  const last = stops[stops.length - 1];
-  return [last[1], last[2], last[3]];
-}
-
-export const PRESETS = {
-  // Warm golden-hour sunset. The default hero grade. Kept gentle: more
-  // levels and more of the original photo, so faces stay smooth and the
-  // paint reads as a grade, not as flat vector bands.
-  sunset: {
-    stops: [
-      [0.0, 26, 10, 46],
-      [0.3, 110, 28, 84],
-      [0.55, 214, 58, 92],
-      [0.78, 255, 158, 74],
-      [1.0, 255, 232, 179],
-    ],
-    levels: 12,
-    photoBlend: 0.36,
-    blur: 3,
-    ink: 0.22,
-    grain: 0.05,
-  },
-  // Magenta night, for the getaway panel. Brightened so the car stays
-  // readable: lighter mids and more of the original photo.
-  neonNight: {
-    stops: [
-      [0.0, 20, 12, 52],
-      [0.32, 110, 30, 130],
-      [0.58, 235, 60, 150],
-      [0.8, 255, 130, 165],
-      [1.0, 255, 225, 235],
-    ],
-    levels: 10,
-    photoBlend: 0.38,
-    blur: 2,
-    ink: 0.26,
-    grain: 0.05,
-  },
-  // Teal dusk, for the score panel. Brightened so the boardwalk, moon and
-  // palms read instead of sinking into murk.
-  tealDusk: {
-    stops: [
-      [0.0, 14, 36, 58],
-      [0.32, 28, 115, 135],
-      [0.58, 60, 180, 175],
-      [0.8, 150, 225, 205],
-      [1.0, 240, 252, 242],
-    ],
-    levels: 10,
-    photoBlend: 0.38,
-    blur: 2,
-    ink: 0.22,
-    grain: 0.05,
-  },
-  // Warm crew grade: a little softer, skin stays natural.
-  warmCrew: {
-    stops: [
-      [0.0, 34, 16, 40],
-      [0.32, 122, 44, 70],
-      [0.58, 222, 96, 84],
-      [0.8, 255, 178, 110],
-      [1.0, 255, 238, 200],
-    ],
-    levels: 12,
-    photoBlend: 0.42,
-    blur: 2,
-    ink: 0.2,
-    grain: 0.045,
-  },
-  // Golden hour pushed warmer.
-  goldenHour: {
-    stops: [
-      [0.0, 30, 14, 40],
-      [0.3, 124, 52, 66],
-      [0.56, 232, 110, 62],
-      [0.8, 255, 190, 90],
-      [1.0, 255, 240, 196],
-    ],
-    levels: 12,
-    photoBlend: 0.36,
-    blur: 3,
-    ink: 0.22,
-    grain: 0.05,
-  },
-  // Vice nights: deep purple-pink, high contrast.
-  viceNights: {
-    stops: [
-      [0.0, 22, 10, 48],
-      [0.32, 110, 28, 118],
-      [0.58, 215, 58, 152],
-      [0.8, 255, 110, 170],
-      [1.0, 255, 218, 226],
-    ],
-    levels: 10,
-    photoBlend: 0.34,
-    blur: 2,
-    ink: 0.28,
-    grain: 0.055,
-  },
+const GRADES = {
+  // Sunset: deep violet shadows, magenta-coral mids, peach-gold highlights.
+  sunset: [
+    [0.0, 38, 16, 64],
+    [0.25, 94, 32, 96],
+    [0.5, 198, 64, 110],
+    [0.75, 242, 138, 110],
+    [1.0, 255, 214, 140],
+  ],
+  // Neon Night: colder, more magenta in the mids, electric pink highlights.
+  neon: [
+    [0.0, 16, 8, 52],
+    [0.25, 72, 24, 110],
+    [0.5, 168, 48, 150],
+    [0.75, 232, 84, 150],
+    [1.0, 255, 190, 220],
+  ],
+  // Teal Dusk: teal shadows, dusty rose mids, pale gold highlights.
+  teal: [
+    [0.0, 10, 42, 54],
+    [0.25, 38, 84, 96],
+    [0.5, 150, 96, 116],
+    [0.75, 226, 158, 128],
+    [1.0, 250, 222, 168],
+  ],
+  // Golden Hour: warm all the way down, amber shadows, honey highlights.
+  golden: [
+    [0.0, 58, 26, 30],
+    [0.25, 120, 52, 48],
+    [0.5, 200, 96, 70],
+    [0.75, 240, 158, 96],
+    [1.0, 255, 220, 150],
+  ],
+  // Warm Crew: a deeper, toastier gold than Golden Hour.
+  warm: [
+    [0.0, 66, 30, 22],
+    [0.25, 132, 60, 40],
+    [0.5, 208, 110, 66],
+    [0.75, 244, 172, 100],
+    [1.0, 255, 226, 160],
+  ],
+  // Vice Nights: indigo shadows, cyan-teal mids, hot pink highlights.
+  vice: [
+    [0.0, 12, 10, 58],
+    [0.25, 46, 44, 128],
+    [0.5, 92, 120, 168],
+    [0.75, 210, 96, 170],
+    [1.0, 255, 120, 190],
+  ],
 };
 
-// Cheap smoothing: draw the image at half size, then back up with smoothing.
-// This flattens photo noise into paint-like regions without a blur filter.
-function smoothed(img, w, h, passes) {
-  const half = document.createElement('canvas');
-  half.width = Math.max(2, w >> 1);
-  half.height = Math.max(2, h >> 1);
-  const hc = half.getContext('2d');
-  hc.imageSmoothingEnabled = true;
-  hc.imageSmoothingQuality = 'high';
-  hc.drawImage(img, 0, 0, half.width, half.height);
-  const out = document.createElement('canvas');
-  out.width = w;
-  out.height = h;
-  const oc = out.getContext('2d');
-  oc.imageSmoothingEnabled = true;
-  oc.imageSmoothingQuality = 'high';
-  for (let i = 0; i < passes; i++) {
-    oc.drawImage(half, 0, 0, w, h);
-    hc.drawImage(out, 0, 0, half.width, half.height);
+const lutCache = new Map();
+
+function gradientLut(stops) {
+  const key = stops.map((s) => s.join(',')).join('|');
+  if (lutCache.has(key)) return lutCache.get(key);
+  const lut = new Uint8Array(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255;
+    let a = stops[0];
+    let b = stops[stops.length - 1];
+    for (let k = 0; k < stops.length - 1; k++) {
+      if (t >= stops[k][0] && t <= stops[k + 1][0]) {
+        a = stops[k];
+        b = stops[k + 1];
+        break;
+      }
+    }
+    const span = b[0] - a[0] || 1;
+    const f = Math.max(0, Math.min(1, (t - a[0]) / span));
+    lut[i * 3] = Math.round(a[1] + (b[1] - a[1]) * f);
+    lut[i * 3 + 1] = Math.round(a[2] + (b[2] - a[2]) * f);
+    lut[i * 3 + 2] = Math.round(a[3] + (b[3] - a[3]) * f);
   }
-  oc.drawImage(half, 0, 0, w, h);
+  lutCache.set(key, lut);
+  return lut;
+}
+
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w));
+  c.height = Math.max(1, Math.round(h));
+  return c;
+}
+
+// Cover-fit framing: the focus point (fx, fy in 0..1 of the photo) lands on the
+// canvas centre, then the result is clamped so no edge of the photo shows.
+// zoom > 1 crops in; zoom 1 is a plain cover fit.
+export function framePhoto(img, w, h, focusX, focusY, zoom) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const s = Math.max(w / iw, h / ih) * (zoom || 1);
+  const dw = iw * s;
+  const dh = ih * s;
+  let dx = w / 2 - focusX * dw;
+  let dy = h / 2 - focusY * dh;
+  if (dw > w) dx = Math.max(w - dw, Math.min(0, dx));
+  else dx = (w - dw) / 2;
+  if (dh > h) dy = Math.max(h - dh, Math.min(0, dy));
+  else dy = (h - dh) / 2;
+  return { dx, dy, dw, dh };
+}
+
+// One smoothing pass: draw the canvas down to half size and back up. Two passes
+// at working scale read as a ~3 px blur and flatten the photo into paint.
+function smoothTwice(src) {
+  const half = makeCanvas(Math.max(2, src.width >> 1), Math.max(2, src.height >> 1));
+  const hctx = half.getContext('2d', { willReadFrequently: true });
+  hctx.imageSmoothingEnabled = true;
+  hctx.imageSmoothingQuality = 'high';
+  hctx.drawImage(src, 0, 0, half.width, half.height);
+  const out = makeCanvas(src.width, src.height);
+  const octx = out.getContext('2d', { willReadFrequently: true });
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = 'high';
+  octx.drawImage(half, 0, 0, out.width, out.height);
   return out;
 }
 
-// Sobel magnitude on a luminance Float32Array, full resolution.
-// Returns a Uint8ClampedArray of edge strength (0..255).
-function sobelEdges(lum, w, h) {
-  const edges = new Uint8ClampedArray(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    const row = y * w;
-    const up = row - w;
-    const dn = row + w;
-    for (let x = 1; x < w - 1; x++) {
+// Thin dark ink on the strong edges only. Computed on a small luminance copy so
+// it stays fast, drawn back scaled up at low alpha: a line, not a poster edge.
+function inkEdges(ctx, w, h, strength) {
+  const small = 320;
+  const sw = small;
+  const sh = Math.max(2, Math.round((small * h) / w));
+  const sc = makeCanvas(sw, sh);
+  const sctx = sc.getContext('2d', { willReadFrequently: true });
+  sctx.drawImage(ctx.canvas, 0, 0, sw, sh);
+  const data = sctx.getImageData(0, 0, sw, sh).data;
+  const lum = new Float32Array(sw * sh);
+  for (let i = 0; i < sw * sh; i++) {
+    lum[i] = 0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2];
+  }
+  const edge = makeCanvas(sw, sh);
+  const ectx = edge.getContext('2d');
+  const out = ectx.createImageData(sw, sh);
+  const threshold = 42;
+  for (let y = 1; y < sh - 1; y++) {
+    for (let x = 1; x < sw - 1; x++) {
+      const i = y * sw + x;
       const gx =
-        -lum[up + x - 1] - 2 * lum[row + x - 1] - lum[dn + x - 1] +
-        lum[up + x + 1] + 2 * lum[row + x + 1] + lum[dn + x + 1];
+        -lum[i - sw - 1] - 2 * lum[i - 1] - lum[i + sw - 1] +
+        lum[i - sw + 1] + 2 * lum[i + 1] + lum[i + sw + 1];
       const gy =
-        -lum[up + x - 1] - 2 * lum[up + x] - lum[up + x + 1] +
-        lum[dn + x - 1] + 2 * lum[dn + x] + lum[dn + x + 1];
-      const m = Math.sqrt(gx * gx + gy * gy);
-      edges[row + x] = m > 255 ? 255 : m;
-    }
-  }
-  return edges;
-}
-
-// Paint a photo into a canvas of exactly w x h (cover fit, centred on the
-// focus point fx/fy in 0..1 of the source image). Returns the canvas.
-// `preset` is one of PRESETS (or a compatible object).
-export function paintPhoto(img, w, h, preset, fx = 0.5, fy = 0.5) {
-  const p = preset;
-  // Cover-fit source rect centred on the focus point.
-  const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-  const sw = w / scale;
-  const sh = h / scale;
-  let sx = fx * img.naturalWidth - sw / 2;
-  let sy = fy * img.naturalHeight - sh / 2;
-  sx = Math.max(0, Math.min(img.naturalWidth - sw, sx));
-  sy = Math.max(0, Math.min(img.naturalHeight - sh, sy));
-
-  const base = document.createElement('canvas');
-  base.width = w;
-  base.height = h;
-  const bc = base.getContext('2d');
-  bc.imageSmoothingEnabled = true;
-  bc.imageSmoothingQuality = 'high';
-  bc.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
-
-  const smooth = smoothed(base, w, h, p.blur);
-  const sc = smooth.getContext('2d');
-  const data = sc.getImageData(0, 0, w, h);
-  const px = data.data;
-  const lum = new Float32Array(w * h);
-  const levels = p.levels;
-  const blend = p.photoBlend;
-  const grainAmt = p.grain * 255;
-
-  // One pass: luminance, dither, posterize, gradient map, blend, grain.
-  for (let i = 0, n = w * h; i < n; i++) {
-    const o = i * 4;
-    const r = px[o];
-    const g = px[o + 1];
-    const b = px[o + 2];
-    const l = 0.299 * r + 0.587 * g + 0.114 * b;
-    lum[i] = l;
-    // Dither before quantising: breaks contour bands on skin/sky.
-    const dithered = l + (Math.random() - 0.5) * (255 / levels) * 0.9;
-    const q = Math.max(0, Math.min(levels - 1, Math.floor((dithered / 256) * levels)));
-    const t = (q + 0.5) / levels;
-    const [pr, pg, pb] = rampAt(p.stops, t);
-    const gr = (Math.random() - 0.5) * grainAmt;
-    px[o] = pr + (r - pr) * blend + gr;
-    px[o + 1] = pg + (g - pg) * blend + gr;
-    px[o + 2] = pb + (b - pb) * blend + gr;
-  }
-  sc.putImageData(data, 0, 0);
-
-  // Ink outline: full-resolution Sobel, thresholded, drawn as dark lines.
-  // The threshold is kept high so only real edges ink in — a low threshold
-  // outlines every leaf and freckle and the faces go harsh.
-  if (p.ink > 0) {
-    const edges = sobelEdges(lum, w, h);
-    const threshold = 68;
-    const inkData = sc.getImageData(0, 0, w, h);
-    const ip = inkData.data;
-    const strength = p.ink;
-    for (let i = 0, n = w * h; i < n; i++) {
-      const e = edges[i];
-      if (e > threshold) {
-        const o = i * 4;
-        const f = Math.min(1, ((e - threshold) / 120) * strength * 2.2);
-        ip[o] *= 1 - f * 0.85;
-        ip[o + 1] *= 1 - f * 0.85;
-        ip[o + 2] *= 1 - f * 0.85;
+        -lum[i - sw - 1] - 2 * lum[i - sw] - lum[i - sw + 1] +
+        lum[i + sw - 1] + 2 * lum[i + sw] + lum[i + sw + 1];
+      const mag = Math.sqrt(gx * gx + gy * gy);
+      if (mag > threshold) {
+        const a = Math.min(255, (mag - threshold) * 2.2);
+        out.data[i * 4] = 24;
+        out.data[i * 4 + 1] = 6;
+        out.data[i * 4 + 2] = 44;
+        out.data[i * 4 + 3] = a;
       }
     }
-    sc.putImageData(inkData, 0, 0);
   }
-  return smooth;
+  ectx.putImageData(out, 0, 0);
+  ctx.save();
+  ctx.globalAlpha = strength;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(edge, 0, 0, w, h);
+  ctx.restore();
+}
+
+let noiseTile = null;
+function grainTile() {
+  if (noiseTile) return noiseTile;
+  const t = makeCanvas(128, 128);
+  const tctx = t.getContext('2d');
+  const img = tctx.createImageData(128, 128);
+  for (let i = 0; i < 128 * 128; i++) {
+    const v = 118 + Math.floor(Math.random() * 20);
+    img.data[i * 4] = v;
+    img.data[i * 4 + 1] = v;
+    img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  tctx.putImageData(img, 0, 0);
+  noiseTile = t;
+  return t;
+}
+
+// Paint one framed photo. Returns a canvas of exactly w x h.
+export function paintPhoto(img, w, h, frame, opts = {}) {
+  const levels = opts.levels ?? 10;
+  const gradientMix = opts.gradientMix ?? 0.65;
+  const photoBlend = opts.photoBlend ?? 0.2;
+  const ink = opts.ink ?? 0.16;
+  const grain = opts.grain ?? 0.035;
+  const grade = GRADES[opts.grade ?? 'sunset'] || GRADES.sunset;
+
+  // 1. Frame the photo on the working canvas.
+  const work = makeCanvas(w, h);
+  const ctx = work.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, frame.dx, frame.dy, frame.dw, frame.dh);
+  const framed = makeCanvas(w, h);
+  framed.getContext('2d').drawImage(work, 0, 0);
+
+  // 2. Smooth into flat paint regions.
+  let painted = smoothTwice(work);
+  painted = smoothTwice(painted);
+
+  // 3. Posterize the light into `levels` steps, then wash it through the
+  // sunset gradient at gradientMix strength.
+  const pctx = painted.getContext('2d', { willReadFrequently: true });
+  const image = pctx.getImageData(0, 0, w, h);
+  const d = image.data;
+  const lut = gradientLut(grade);
+  const step = 255 / (levels - 1);
+  // Bayer 4x4 ordered dither: nudges each pixel's light up or down by up to
+  // half a posterize step before quantizing, so a smooth gradient stays
+  // smooth instead of breaking into flat contour bands on skin and sky.
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  for (let p = 0, i = 0; p < w * h; p++, i += 4) {
+    const x = p % w;
+    const y = (p / w) | 0;
+    const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    const dither = (BAYER[(x & 3) + ((y & 3) << 2)] - 7.5) * (step / 16);
+    const q = Math.round((l + dither) / step) * step;
+    const qi = Math.max(0, Math.min(255, Math.round(q)));
+    const g = gradientMix;
+    d[i] = lut[qi * 3] * g + q * (1 - g);
+    d[i + 1] = lut[qi * 3 + 1] * g + q * (1 - g);
+    d[i + 2] = lut[qi * 3 + 2] * g + q * (1 - g);
+  }
+  pctx.putImageData(image, 0, 0);
+
+  // 4. Ink the strong edges, thin and quiet.
+  if (ink > 0) inkEdges(pctx, w, h, ink);
+
+  // 5. Let a little of the real photo back in so faces stay readable.
+  if (photoBlend > 0) {
+    pctx.save();
+    pctx.globalAlpha = photoBlend;
+    pctx.drawImage(framed, 0, 0);
+    pctx.restore();
+  }
+
+  // 6. A whisper of grain over the whole surface, nothing more.
+  if (grain > 0) {
+    pctx.save();
+    pctx.globalAlpha = grain;
+    pctx.fillStyle = pctx.createPattern(grainTile(), 'repeat');
+    pctx.fillRect(0, 0, w, h);
+    pctx.restore();
+  }
+
+  // 7. A mild lift so panels never read murky: a touch brighter, a touch richer.
+  if (opts.brighten || opts.saturate) {
+    const lift = makeCanvas(w, h);
+    const lctx = lift.getContext('2d');
+    lctx.filter = `brightness(${opts.brighten ?? 1.06}) saturate(${opts.saturate ?? 1.1})`;
+    lctx.drawImage(painted, 0, 0);
+    return lift;
+  }
+  return painted;
+}
+
+export function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('cannot load ' + src));
+    img.src = src;
+  });
 }

@@ -1,50 +1,62 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SUNSET PRESS — One photo in. A full key-art poster out.</title>
-<link rel="stylesheet" href="style.css">
+<title>SUNSET PRESS — one photo in, a full key-art poster out</title>
+<link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">SUNSET PRESS</div>
-  <div class="tagline">One photo in. A full key-art poster out.</div>
+<header class="brand">
+  <h1>SUNSET PRESS</h1>
+  <p>One photo in. A full key-art poster out.</p>
 </header>
 <main class="layout">
-  <section class="stage-col">
-    <div class="preview-wrap" id="preview-wrap">
-      <canvas id="preview" width="620" height="620"></canvas>
-      <div class="focus-ring" id="focus-ring" style="display:none"></div>
-    </div>
-    <div class="size-tabs" id="size-tabs"></div>
-    <div class="export-row">
-      <button type="button" class="export-btn" id="export-one">Export PNG</button>
-      <button type="button" class="export-btn ghost" id="export-all">Export all 3 sizes</button>
-    </div>
+  <section class="stage">
+    <canvas id="preview" width="1080" height="1080" aria-label="Live poster preview"></canvas>
+    <p class="hint">Drag the poster to pan the hero · scroll to zoom it</p>
   </section>
   <aside class="controls">
     <section class="card">
-      <h2><span class="step">1</span> · YOUR PHOTO</h2>
-      <button type="button" class="choose-btn" id="choose-photo">Choose a photo…</button>
-      <input type="file" id="photo-file" accept="image/*" hidden>
-      <div class="sample-row" id="sample-row"></div>
-      <p class="hint">Or tap a sample. Photos never leave your machine.</p>
+      <h2><span>1</span> · Your photo</h2>
+      <label class="file-btn">Choose a photo…
+        <input id="photoFile" type="file" accept="image/*">
+      </label>
+      <div id="sampleRow" class="thumbs"></div>
+      <p class="note">Or tap a sample. Photos never leave your machine.</p>
     </section>
     <section class="card">
-      <h2><span class="step">2</span> · POSTER STYLE</h2>
-      <div class="style-grid" id="style-grid"></div>
+      <h2><span>2</span> · Poster style</h2>
+      <div id="styleRow" class="style-grid"></div>
+      <button id="shuffleStyle" type="button" class="wide-btn">Shuffle style</button>
     </section>
     <section class="card">
-      <h2><span class="step">3</span> · CAPTION</h2>
-      <label class="field-label" for="caption-title">Title</label>
-      <input class="field" id="caption-title" type="text" value="SUNSET HEIST" maxlength="24">
-      <label class="field-label" for="caption-kicker">Kicker</label>
-      <input class="field" id="caption-kicker" type="text" value="ONE LAST JOB." maxlength="32">
-      <p class="hint">Drag on the preview to move the subject focus. The title and footer are laid out from the bottom up, so they never cover a face.</p>
+      <h2><span>3</span> · Caption</h2>
+      <label>Title
+        <input id="titleInput" type="text" maxlength="24" value="SUNSET HEIST">
+      </label>
+      <label>Kicker
+        <input id="kickerInput" type="text" maxlength="32" value="ONE LAST JOB.">
+      </label>
+      <label>Title height
+        <input id="titleShift" type="range" min="-1" max="1" step="0.05" value="0">
+      </label>
+    </section>
+    <section class="card">
+      <h2><span>4</span> · Panels</h2>
+      <label>The Crew <select id="crewSelect"></select></label>
+      <label>The Getaway <select id="getawaySelect"></select></label>
+      <label>The Score <select id="scoreSelect"></select></label>
+    </section>
+    <section class="card">
+      <h2><span>5</span> · Size &amp; export</h2>
+      <div id="sizeTabs" class="size-tabs"></div>
+      <button id="exportBtn" type="button" class="cta">Export PNG</button>
+      <button id="exportAllBtn" type="button" class="wide-btn">Export all 3 sizes</button>
+      <p id="status" role="status">Loading…</p>
     </section>
   </aside>
 </main>
-<script type="module" src="src/ui.js"></script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>
