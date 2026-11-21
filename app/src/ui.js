@@ -109,7 +109,9 @@ function spLayoutPx() {
   const scale = spPreviewScale();
   const W = dims.w * scale;
   const H = dims.h * scale;
-  const L = spLayoutFor(spState.size);
+  // Fix round 5, item 1: same flip rule as the renderer — the overlay
+  // rects must sit where the panels actually are.
+  const L = spLayoutFor(spState.size, !!(spState.focus && spState.focus.x > 0.5));
   const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
   return { W, H, hero: R(L.hero), supports: L.supports.map(R), title: R(L.title), footer: R(L.footer) };
 }

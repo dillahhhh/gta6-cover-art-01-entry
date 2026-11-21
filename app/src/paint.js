@@ -167,17 +167,40 @@ function spPaintPhoto(img, rampName, W, H, crop, strength) {
       // Skin lives in this band: pull ~15% of the yellow warmth out so
       // faces stay human under the golden grade (fix round, item 9).
       // The sky keeps its gold — it comes from the backdrop, not this ramp.
-      const avg = (r + g + b) / 3;
-      r = r * 0.85 + avg * 0.15;
-      g = g * 0.85 + avg * 0.15;
-      b = b * 0.85 + avg * 0.15;
+      // Fix round 5, item 5: the pull applies ONLY when the ORIGINAL
+      // pixel is warm (skin-like). The old blanket pull also greyed
+      // the sea and foliage — THE SHORE's water went grey-green mud.
+      // Cool/greenish originals (sea, foliage) keep the full amber
+      // paint and get warmed again after the blend, below.
+      const or = orig[i * 4], og = orig[i * 4 + 1], ob = orig[i * 4 + 2];
+      if (or >= og && og >= ob) {
+        const avg = (r + g + b) / 3;
+        r = r * 0.85 + avg * 0.15;
+        g = g * 0.85 + avg * 0.15;
+        b = b * 0.85 + avg * 0.15;
+      }
     }
     // Blend: s of paint, (1 - s) of the smoothed original photo, so the
     // result reads as a light painting over a real face, not a blob.
     const m = s;
-    d[i * 4] = Math.max(0, Math.min(255, r * m + orig[i * 4] * (1 - m)));
-    d[i * 4 + 1] = Math.max(0, Math.min(255, g * m + orig[i * 4 + 1] * (1 - m)));
-    d[i * 4 + 2] = Math.max(0, Math.min(255, b * m + orig[i * 4 + 2] * (1 - m)));
+    let fr = r * m + orig[i * 4] * (1 - m);
+    let fg = g * m + orig[i * 4 + 1] * (1 - m);
+    let fb = b * m + orig[i * 4 + 2] * (1 - m);
+    if (rampName === 'golden' && l > 0.45 && l < 0.85) {
+      // Fix round 5, item 5 (continued): the blend keeps 53% of the
+      // original, so a grey-green sea stays grey-green even with amber
+      // paint. Warm the BLENDED result toward amber/peach when the
+      // original pixel is cool/greenish — the sea turns amber instead
+      // of mud, while warm skin above is untouched.
+      const or = orig[i * 4], og = orig[i * 4 + 1], ob = orig[i * 4 + 2];
+      if (!(or >= og && og >= ob)) {
+        fr = Math.min(255, fr * 1.10 + 8);
+        fb = fb * 0.88;
+      }
+    }
+    d[i * 4] = Math.max(0, Math.min(255, fr));
+    d[i * 4 + 1] = Math.max(0, Math.min(255, fg));
+    d[i * 4 + 2] = Math.max(0, Math.min(255, fb));
   }
   wctx.putImageData(src, 0, 0);
 
@@ -191,6 +214,32 @@ function spPaintPhoto(img, rampName, W, H, crop, strength) {
   wctx.fillRect(0, 0, W, H);
   wctx.globalCompositeOperation = 'source-over';
   return work;
+}
+
+/* Light unsharp mask (fix round 5, item 3): out = orig + amount *
+ * (orig - blur(radius)). Applied in place; the 4:5 hero upscales the
+ * square sample ~1.25x, so faces and background go soft without it.
+ * Keep it light (0.4 / 1.2 px) — a poster, not a sharpened photo. */
+function spUnsharp(canvas, amount, radius) {
+  const W = canvas.width;
+  const H = canvas.height;
+  const blurred = spCanvas(W, H);
+  const bctx = blurred.getContext('2d');
+  bctx.filter = 'blur(' + radius + 'px)';
+  bctx.drawImage(canvas, 0, 0);
+  bctx.filter = 'none';
+  const ctx = canvas.getContext('2d');
+  const orig = ctx.getImageData(0, 0, W, H);
+  const blur = bctx.getImageData(0, 0, W, H);
+  const d = orig.data;
+  const b = blur.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = Math.max(0, Math.min(255, d[i] + amount * (d[i] - b[i])));
+    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] + amount * (d[i + 1] - b[i + 1])));
+    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] + amount * (d[i + 2] - b[i + 2])));
+  }
+  ctx.putImageData(orig, 0, 0);
+  return canvas;
 }
 
 /* Full-bleed hero mask (fix round 2, longer fade in fix round 3,

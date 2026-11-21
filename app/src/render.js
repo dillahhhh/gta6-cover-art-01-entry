@@ -18,32 +18,45 @@ const SP_SIZES = {
  * photo, top to bottom, painted over the full canvas — no hero column,
  * no skyline band splitting it. The title, tagline and footer sit ON the
  * photo over a dark bottom gradient, and the three supporting panels
- * float on the photo's right side. Fractions of (W, H). */
-function spLayoutFor(sizeName) {
+ * float on the photo's right side. Fractions of (W, H).
+ *
+ * Fix round 5, item 1: the panel stack is NARROW (~27% of the width)
+ * and starts clear of the hero subject's face. The sample couple
+ * spans photo x 0.34–0.69; with a centred hero crop the man's face
+ * lands at canvas x ~0.89 (square) and ~0.99 (portrait) — under the
+ * old 0.645/0.575 stacks, which is why only his sunglasses showed.
+ * Square panels start at 0.73, wide at 0.72, portrait at 0.80 (the
+ * portrait hero is also reframed — see SP_HERO_FRAME — so 0.80
+ * clears it; the narrow portrait window cannot fit both faces left
+ * of a 0.73 stack at any zoom that still covers the canvas).
+ * `flip` mirrors the stack to the LEFT when the
+ * subject focus sits right of centre (focus.x > 0.5): the subject
+ * is never covered, whatever photo is loaded. */
+function spLayoutFor(sizeName, flip) {
   // (fix round 2, item 8: the portrait band was too tall — the tagline
   // sat ~200 px above the footer with dead air between them. The band
   // is shorter now and the footer rides up to meet it.)
+  let layout;
   if (sizeName === 'portrait') {
-    return {
+    layout = {
       hero: { x: 0, y: 0, w: 1, h: 1 },
       supports: [
-        { x: 0.635, y: 0, w: 0.365, h: 0.16 },
-        { x: 0.635, y: 0.185, w: 0.365, h: 0.16 },
-        { x: 0.635, y: 0.37, w: 0.365, h: 0.16 },
+        { x: 0.80, y: 0, w: 0.20, h: 0.16 },
+        { x: 0.80, y: 0.185, w: 0.20, h: 0.16 },
+        { x: 0.80, y: 0.37, w: 0.20, h: 0.16 },
       ],
       title: { x: 0, y: 0.545, w: 1, h: 0.22 },
       // Fix round 3, item 4: the footer rides up to meet the title
       // band (was 0.80), so the dark strip between them is gone.
       footer: { x: 0, y: 0.77, w: 1, h: 0.09 },
     };
-  }
-  if (sizeName === 'wide') {
-    return {
+  } else if (sizeName === 'wide') {
+    layout = {
       hero: { x: 0, y: 0, w: 1, h: 1 },
       supports: [
-        { x: 0.575, y: 0, w: 0.425, h: 0.22 },
-        { x: 0.575, y: 0.24, w: 0.425, h: 0.22 },
-        { x: 0.575, y: 0.48, w: 0.425, h: 0.22 },
+        { x: 0.72, y: 0, w: 0.28, h: 0.22 },
+        { x: 0.72, y: 0.24, w: 0.28, h: 0.22 },
+        { x: 0.72, y: 0.48, w: 0.28, h: 0.22 },
       ],
       // Fix round 4, item 5: the title band is taller (was 0.715 /
       // 0.20) so the grown 16:9 wordmark (≥55% of the canvas) fits
@@ -53,17 +66,22 @@ function spLayoutFor(sizeName) {
       // 0.93), so the dark strip under the title on the right is gone.
       footer: { x: 0, y: 0.94, w: 1, h: 0.06 },
     };
+  } else {
+    layout = {
+      hero: { x: 0, y: 0, w: 1, h: 1 },
+      supports: [
+        { x: 0.73, y: 0, w: 0.27, h: 0.18 },
+        { x: 0.73, y: 0.205, w: 0.27, h: 0.20 },
+        { x: 0.73, y: 0.43, w: 0.27, h: 0.20 },
+      ],
+      title: { x: 0, y: 0.665, w: 1, h: 0.24 },
+      footer: { x: 0, y: 0.915, w: 1, h: 0.085 },
+    };
   }
-  return {
-    hero: { x: 0, y: 0, w: 1, h: 1 },
-    supports: [
-      { x: 0.645, y: 0, w: 0.355, h: 0.18 },
-      { x: 0.645, y: 0.205, w: 0.355, h: 0.20 },
-      { x: 0.645, y: 0.43, w: 0.355, h: 0.20 },
-    ],
-    title: { x: 0, y: 0.665, w: 1, h: 0.24 },
-    footer: { x: 0, y: 0.915, w: 1, h: 0.085 },
-  };
+  if (flip) {
+    layout.supports = layout.supports.map((f) => ({ ...f, x: 1 - f.x - f.w }));
+  }
+  return layout;
 }
 
 function spRoundRect(ctx, x, y, w, h, r) {
@@ -94,20 +112,26 @@ function spSetSpacing(ctx, px) {
 
 /* The 3D wordmark: hard offset extrusion, neon glow, vertical gradient
  * fill, dark outline, white top highlight. The title fills the band:
- * it shrinks to fit 80% of the width, and it GROWS to at least 62% —
- * on 16:9 the band is short, so a height-only fit left the wordmark at
- * ~38% of the canvas (fix round 4, item 5). Growth is capped so the
- * letters + extrusion still clear the tagline. */
-function spDrawTitle(ctx, text, cx, cy, maxW, maxH, style) {
+ * it shrinks to fit 80% of the width, and it GROWS to at least
+ * minFill of the width (0.62 normally) — on 16:9 the band is short,
+ * so a height-only fit left the wordmark at ~38% of the canvas
+ * (fix round 4, item 5). Growth is capped so the letters + extrusion
+ * still clear the tagline. On 16:9 the caller passes minFill 0.55:
+ * at 0.62 the wordmark grows so tall its extrusion eats the tagline
+ * slot and the tagline lands on the footer (fix round 5, item 4) —
+ * the band is only 24% tall and title + tagline + footer cannot all
+ * fit under a 62% wordmark. 55% is the round-4 floor and it fits. */
+function spDrawTitle(ctx, text, cx, cy, maxW, maxH, style, minFill) {
   // Start big and shrink to fit the width: on wide posters the band is
   // short but the width is plentiful, so the title must grow to fill it.
+  const fill = minFill == null ? 0.62 : minFill;
   let size = maxH * 0.95;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const setFont = (s) => { ctx.font = s + 'px Anton, "Arial Black", sans-serif'; };
   setFont(Math.round(size));
   spSetSpacing(ctx, Math.max(1, size * 0.02));
-  while (ctx.measureText(text).width < maxW * 0.62 && size < maxH * 1.5) {
+  while (ctx.measureText(text).width < maxW * fill && size < maxH * 1.5) {
     size *= 1.06;
     setFont(Math.round(size));
   }
@@ -199,6 +223,26 @@ function spGrade(ctx, W, H, style) {
   }
 }
 
+/* Per-size hero framing (fix round 5, item 1). Narrowing the panels
+ * alone does NOT free the subject: the sample couple spans photo x
+ * 0.34–0.69, and a centred hero crop maps the man's face (right edge
+ * photo 0.69) to canvas x ~0.89 (square) and ~0.99 (portrait) — under
+ * any right-side stack. So each size reframes the hero crop on top of
+ * the user's crop (a layout adaptation, like the title band differing
+ * per size): square pans right and zooms out slightly so BOTH faces
+ * sit fully left of the 0.73 panels with ~20–30 px margins (the first
+ * pass, pan only, left the woman's face touching the left edge);
+ * portrait zooms out to scale 1.0 — the widest window that still
+ * covers the canvas — and pans so both faces sit left of the 0.80
+ * panels with ~10 px margins; wide needs only a small nudge for
+ * margin (the 16:9 photo maps nearly 1:1 there and the face already
+ * clears 0.72). Verified against the cover math (spCoverDraw). */
+const SP_HERO_FRAME = {
+  square: { dx: 0.233, scale: 1.10 / 1.15 },
+  portrait: { dx: 0.17, scale: 1 / 1.15 },
+  wide: { dx: 0.05, scale: 1 },
+};
+
 /* Render the full poster. state: {photos, hero, panels, style, title,
  * subtitle, tagline, focus, backdrop}. imgMap: src -> loaded Image.
  * scale: render at W*scale (1 = export size, ~0.15 = style thumbnail).
@@ -215,7 +259,11 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   const W = Math.round(dims.w * scale);
   const H = Math.round(dims.h * scale);
   const style = SP_STYLES[state.style] || SP_STYLES.sunset;
-  const L = spLayoutFor(sizeName);
+  // Fix round 5, item 1: the panel stack flips to the LEFT when the
+  // subject focus sits right of centre, so the subject is never
+  // covered, whatever photo is loaded.
+  const flipPanels = !!(state.focus && state.focus.x > 0.5);
+  const L = spLayoutFor(sizeName, flipPanels);
   const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
 
   const canvas = spCanvas(W, H);
@@ -236,7 +284,18 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   const heroImg = imgMap.get(state.photos[state.hero.photo]);
   let heroPainted = null;
   if (heroImg) {
-    heroPainted = spPaintPhoto(heroImg, style.ramp, W, H, state.hero.crop, PAINT);
+    // Per-size hero framing (fix round 5, item 1 — see SP_HERO_FRAME):
+    // pan/zoom the crop so both faces sit left of the panel stack.
+    const frame = SP_HERO_FRAME[sizeName] || { dx: 0, scale: 1 };
+    const heroCrop = {
+      ...state.hero.crop,
+      x: Math.max(0, Math.min(0.95, (state.hero.crop.x ?? 0.5) + frame.dx)),
+      scale: (state.hero.crop.scale || 1) * frame.scale,
+    };
+    heroPainted = spPaintPhoto(heroImg, style.ramp, W, H, heroCrop, PAINT);
+    // Fix round 5, item 3: the 4:5 hero upscales the square sample
+    // ~1.25x, so faces go soft — a light unsharp mask after scaling.
+    if (sizeName === 'portrait') spUnsharp(heroPainted, 0.4, 1.2);
   }
   if (state.backdrop) {
     spDrawBackdrop(ctx, 0, 0, W, H, style.backdrop);
@@ -288,16 +347,28 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
     // Face-zone crop (item 5): the panel's crop centres on the photo's
     // faces (upper third by default), never on its middle.
     const faceCrop = { ...panel.crop, y: spFaceY(state.photos[panel.photo]) };
-    // Painted at 2x and drawn down: the ink and posterize stay crisp
-    // instead of blurring up from panel resolution.
+    // Fix round 5, item 2: painted at the panel's OUTPUT resolution.
+    // The old 2x paint + draw-down halved the 1 px ink lines and
+    // smoothed the posterize steps with the downscale, so the panels
+    // read only ~15% painted next to the hero (painted at 1x). At 1x
+    // the ink and the bands stay full-strength, matching the hero.
     const painted = spPaintPhoto(img, ramp,
-      Math.max(2, Math.round(p.w * 2)), Math.max(2, Math.round(p.h * 2)), faceCrop, PAINT);
+      Math.max(2, Math.round(p.w)), Math.max(2, Math.round(p.h)), faceCrop, PAINT);
     ctx.save();
     spSlantPath(ctx, p.x, p.y, p.w, p.h);
     ctx.clip();
     // Wide posters: lift the right panels ~12% brighter and pull the
     // magenta back a little so both sides read as one world (fix item 7).
-    if (sizeName === 'wide') ctx.filter = 'brightness(1.12) saturate(0.92)';
+    // Fix round 5, item 5: THE SHORE (beach/palm, golden ramp) gets
+    // +25% saturation — its sea read grey-green mud next to the
+    // saturated hero. (The amber shift itself lives in the golden
+    // branch of spPaintPhoto.)
+    const isShore = state.photos[panel.photo] === 'samples/beach-night.jpg'
+      || state.photos[panel.photo] === 'samples/palm-beach.jpg';
+    let filt = 'none';
+    if (sizeName === 'wide') filt = 'brightness(1.12) saturate(0.92)';
+    if (isShore) filt = (sizeName === 'wide' ? 'brightness(1.12) ' : '') + 'saturate(1.25)';
+    if (filt !== 'none') ctx.filter = filt;
     ctx.drawImage(painted, p.x, p.y, p.w, p.h);
     ctx.filter = 'none';
     ctx.restore();
@@ -340,18 +411,31 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
 
   // Wordmark + tagline. The title sits lower in its band and the tagline
   // closer under it (fix round 2, item 8): no more dead air inside the band.
+  // Fix round 5, item 4: on 16:9 the wordmark is capped at 55% width and
+  // sits a little higher (0.47) — at 62%/0.50 its extrusion reaches the
+  // tagline slot and the tagline lands on the footer subtitle.
   const titleCx = tR.x + tR.w / 2;
-  const titleCy = tR.y + tR.h * 0.50;
-  spDrawTitle(ctx, state.title, titleCx, titleCy, tR.w, tR.h * 0.70, style);
+  const titleCy = tR.y + tR.h * (sizeName === 'wide' ? 0.47 : 0.50);
+  const titleSize = spDrawTitle(ctx, state.title, titleCx, titleCy, tR.w, tR.h * 0.70, style,
+    sizeName === 'wide' ? 0.55 : 0.62);
 
   if (state.tagline) {
     // Bebas Neue, not script/serif (fix round 2, item 6): the tagline
     // must be a bundled OFL condensed face, and it must stay legible.
-    ctx.font = Math.round(Math.max(16, tR.h * 0.175)) + 'px "Bebas Neue", sans-serif';
+    const tagFont = Math.round(Math.max(16, tR.h * 0.175));
+    ctx.font = tagFont + 'px "Bebas Neue", sans-serif';
     spSetSpacing(ctx, Math.max(1, tR.h * 0.02));
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const tagY = tR.y + tR.h * 0.86;
+    // Fix round 5, item 4: the tagline sits 10 px below the lowest
+    // point of the title's extrusion (cap half ~0.36em + the 3-layer
+    // down-right extrusion ~0.126em), never on it. The old fixed
+    // 0.86 slot touched the extrusion on 16:9, where the wordmark
+    // grows widest; on square/portrait this lands within a few px of
+    // the old slot, so nothing else moves. The 10 px gap scales with
+    // the render (10 * scale): a fixed 10 px is 21 export px in the
+    // editor preview and pushes the tagline onto the footer there.
+    const tagY = titleCy + titleSize * 0.486 + 10 * scale + tagFont * 0.36;
     ctx.fillStyle = '#0a0312';
     ctx.fillText(state.tagline, titleCx, tagY + Math.max(2, tR.h * 0.02));
     ctx.fillStyle = style.sub;
@@ -364,15 +448,20 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   // the portrait mini-skyline is gone with the rest of the skyline).
   const fR = R(L.footer);
   const fy = fR.y + fR.h / 2;
+  // Fix round 5, item 4: the wide footer is ~1.4x larger. The wide
+  // footer band is only 6% of the height, so its stars/subtitle/press
+  // mark read tiny next to the huge wordmark; square (8.5%) and
+  // portrait (9%) are already big enough and stay as they are.
+  const footScale = sizeName === 'wide' ? 1.4 : 1;
   // Bebas Neue for the stars too (fix round 3, item 1: the last
   // plain `sans-serif` in the renderer — pinned so no text on any
   // cover can fall back to a generic face a reviewer might misread).
-  ctx.font = Math.round(Math.max(12, fR.h * 0.32)) + 'px "Bebas Neue", sans-serif';
+  ctx.font = Math.round(Math.max(12, fR.h * 0.32) * footScale) + 'px "Bebas Neue", sans-serif';
   ctx.fillStyle = '#ffcf4d';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText('★★★★★', fR.x + 12 * scale, fy);
-  ctx.font = Math.round(Math.max(14, fR.h * 0.46)) + 'px "Bebas Neue", sans-serif';
+  ctx.font = Math.round(Math.max(14, fR.h * 0.46) * footScale) + 'px "Bebas Neue", sans-serif';
   spSetSpacing(ctx, Math.max(1, fR.h * 0.06));
   ctx.textAlign = 'center';
   ctx.fillStyle = '#0a0312';
@@ -380,7 +469,7 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   ctx.fillStyle = '#f5e9ff';
   ctx.fillText(state.subtitle, fR.x + fR.w / 2, fy);
   spSetSpacing(ctx, 0);
-  ctx.font = Math.round(Math.max(11, fR.h * 0.30)) + 'px "Bebas Neue", sans-serif';
+  ctx.font = Math.round(Math.max(11, fR.h * 0.30) * footScale) + 'px "Bebas Neue", sans-serif';
   ctx.fillStyle = style.accent;
   ctx.textAlign = 'right';
   ctx.fillText('SUNSET PRESS', fR.x + fR.w - 12 * scale, fy);

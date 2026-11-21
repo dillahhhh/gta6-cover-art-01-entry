@@ -101,7 +101,15 @@ body {
 .sizes button.on { border-color: #ff2e88; background: #2a0a35; }
 
 .stage { padding: 18px 22px; min-width: 0; display: flex; flex-direction: column; min-height: calc(100vh - 49px); }
-.canvas-wrap { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; text-align: center; min-height: 0; }
+/* Fix round 5, item 6: the old `flex: 1` + `justify-content: center`
+ * stretched this wrapper to fill the stage and centred the poster in
+ * it — leaving a dead band between the Make My Cover button and the
+ * preview, and another between the preview and the HERO/PANEL chips
+ * (the 16:9 preview only fills ~60% of the stage height). The wrapper
+ * now hugs the preview (flex none, top-aligned), so the button, the
+ * poster, the hint and the chips sit tight together; any leftover
+ * space falls below the chips, where it belongs. */
+.canvas-wrap { display: flex; flex: 0 0 auto; flex-direction: column; align-items: center; justify-content: flex-start; text-align: center; min-height: 0; }
 #preview {
   display: block; margin: 0 auto;
   max-width: 100%; max-height: calc(100vh - 200px);
@@ -113,7 +121,7 @@ body {
   background: rgba(10, 3, 18, .82); color: #d9c2ec; font-size: 12px;
   padding: 6px 12px; border-radius: 20px;
 }
-.panel-strip { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.panel-strip { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
 .panel-chip {
   border: 1px solid #3a1a52; background: #16041f; color: #f5e9ff; border-radius: 8px;
   padding: 7px 12px; cursor: pointer; font-size: 12.5px;
@@ -124,7 +132,7 @@ body {
 /* One-click cover button (fix round, item 6): the single obvious entry
  * point, loud enough to read as "one click and done". */
 .make-cover {
-  display: block; width: 100%; margin-bottom: 14px; padding: 14px 18px;
+  display: block; width: 100%; margin-bottom: 10px; padding: 14px 18px;
   font-family: 'Anton', sans-serif; font-size: 22px; letter-spacing: 3px;
   color: #16041a; background: linear-gradient(90deg, #ff2e88, #ff9a2a);
   border: none; border-radius: 12px; cursor: pointer;
