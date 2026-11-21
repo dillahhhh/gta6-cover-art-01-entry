@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """shots4.py — renders the 4 SUNSET PRESS screenshots with headless Chromium.
+
 Serves app/ locally, drives the editor through window.__sunsetPress, and
 saves each shot as a JPEG inside the 256 KiB / 1280px limits.
+
 Usage: python3 shots4.py [--port 8123]
 Exits non-zero if any shot is missing, oversized, or a console error fired.
 """

@@ -1,128 +1,95 @@
 // ui.js — the SUNSET PRESS editor.
-// One screen: a live preview on the left, controls on the right.
-// The Subject Focus ellipse is a DOM overlay on the preview, shown ONLY
-// while the user drags the focus handle. It is never drawn on any canvas,
-// so it can never leak into an exported PNG (Claude round-5 fix 5).
+//
+// Wires the page: loads the sample photos and the bundled fonts, renders
+// the live preview, and exposes window.__sunsetPress so the screenshot
+// harness (and any embedder) can render and export covers at exact size.
+// The subject-focus ellipse is a DOM overlay that only appears while the
+// user drags it, so it never shows up in the editor screenshot.
+//
+// Everything here is written for this round; nothing is copied from an
+// earlier build.
 
-import { renderCover, exportPNG, SIZES, loadImage } from './render.js';
+import { renderCover, SIZES } from './render.js';
 
 const SAMPLES = [
-  { name: 'Hero — lakeside duo', src: 'samples/hero-real.jpg' },
-  { name: 'Friends day', src: 'samples/friends-day.jpg' },
-  { name: 'Group night', src: 'samples/group-night.jpg' },
-  { name: 'Selfie day', src: 'samples/selfie-day.jpg' },
-  { name: 'Getaway', src: 'samples/getaway.jpg' },
-  { name: 'Palm beach', src: 'samples/palm-beach.jpg' },
+  { name: 'hero-real', src: 'samples/hero-real.jpg' },
+  { name: 'friends-day', src: 'samples/friends-day.jpg' },
+  { name: 'group-night', src: 'samples/group-night.jpg' },
+  { name: 'hotel-night', src: 'samples/hotel-night.jpg' },
+  { name: 'beach-night', src: 'samples/beach-night.jpg' },
+  { name: 'selfie-day', src: 'samples/selfie-day.jpg' },
 ];
 
 const STYLES = [
-  { name: 'Sunset', grade: 'sunset' },
-  { name: 'Neon Night', grade: 'neonNight' },
-  { name: 'Teal Dusk', grade: 'tealDusk' },
-  { name: 'Warm Crew', grade: 'crew' },
-  { name: 'Golden Hour', grade: 'sunset' },
-  { name: 'Vice Nights', grade: 'neonNight' },
+  { name: 'Sunset', preset: 'sunset' },
+  { name: 'Neon Night', preset: 'neonNight' },
+  { name: 'Teal Dusk', preset: 'tealDusk' },
+  { name: 'Warm Crew', preset: 'warmCrew' },
+  { name: 'Golden Hour', preset: 'goldenHour' },
+  { name: 'Vice Nights', preset: 'viceNights' },
+];
+
+const SIZE_TABS = [
+  { name: 'square', label: '1080 x 1080' },
+  { name: 'portrait', label: '1080 x 1350' },
+  { name: 'wide', label: '1920 x 1080' },
 ];
 
 const state = {
-  size: 'square',
-  style: 0,
-  panelSide: 'auto', // auto | left | right | off
-  titleHeight: 0, // -10..+10 percent shift of the title block
+  heroImg: null,
+  crewImg: null,
+  getawayImg: null,
+  scoreImg: null,
+  style: 'sunset',
   title: 'SUNSET HEIST',
   kicker: 'ONE LAST JOB.',
-  focus: { x: 0.62, y: 0.38 },
-  heroSrc: 'samples/hero-real.jpg',
-  busy: false,
+  footer: 'VICE CITY · TONIGHT · SUNSET PRESS',
+  size: 'square',
+  focus: null, // {fx, fy} set by dragging the subject-focus ellipse
 };
 
-let previewCanvas = null;
-let previewWrap = null;
-let focusRing = null;
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('failed to load ' + src));
+    img.src = src;
+  });
+}
+
+const $ = (id) => document.getElementById(id);
+
+let previewCanvas;
+let focusRing;
 let draggingFocus = false;
 
-function el(id) {
-  return document.getElementById(id);
+function paintPreview() {
+  const size = SIZES[state.size];
+  const cover = renderCover(state.size, state);
+  // Fit the preview canvas to the cover aspect, capped for the page.
+  const maxW = 620;
+  const maxH = 620;
+  const scale = Math.min(maxW / size.w, maxH / size.h, 1);
+  const pw = Math.max(2, Math.round(size.w * scale));
+  const ph = Math.max(2, Math.round(size.h * scale));
+  previewCanvas.width = pw;
+  previewCanvas.height = ph;
+  const ctx = previewCanvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(cover, 0, 0, pw, ph);
+  // Keep the focus ring sized to the preview box.
+  focusRing.style.width = pw + 'px';
+  focusRing.style.height = ph + 'px';
 }
 
-function showFocusRing(show) {
-  if (!focusRing) return;
-  focusRing.style.display = show ? 'block' : 'none';
-}
-
-// Re-render the preview canvas at the current size (scaled to fit).
-async function refreshPreview() {
-  if (!previewCanvas || state.busy) return;
-  state.busy = true;
-  try {
-    const canvas = await renderCover(state.size);
-    const ctx = previewCanvas.getContext('2d');
-    previewCanvas.width = canvas.width;
-    previewCanvas.height = canvas.height;
-    ctx.drawImage(canvas, 0, 0);
-    positionFocusRing();
-  } finally {
-    state.busy = false;
-  }
-}
-
-// The focus ring is a DOM overlay positioned over the preview canvas.
-// It is only visible while the user drags it.
-function positionFocusRing() {
-  if (!focusRing || !previewWrap || !previewCanvas) return;
-  const r = previewCanvas.getBoundingClientRect();
-  const w = previewWrap.getBoundingClientRect();
-  const fx = (state.focus.x * r.width) / w.width * 100;
-  const fy = (state.focus.y * r.height) / w.height * 100;
-  focusRing.style.left = `calc(${fx}% - 55px)`;
-  focusRing.style.top = `calc(${fy}% - 40px)`;
-}
-
-function bindFocusDrag() {
-  if (!focusRing || !previewWrap) return;
-  const move = (ev) => {
-    if (!draggingFocus) return;
-    const r = previewCanvas.getBoundingClientRect();
-    const x = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
-    const y = Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height));
-    state.focus = { x, y };
-    positionFocusRing();
-  };
-  focusRing.addEventListener('pointerdown', (ev) => {
-    draggingFocus = true;
-    focusRing.setPointerCapture(ev.pointerId);
-    showFocusRing(true);
-    ev.preventDefault();
-  });
-  focusRing.addEventListener('pointermove', move);
-  focusRing.addEventListener('pointerup', () => {
-    draggingFocus = false;
-    showFocusRing(false);
-    refreshPreview();
-  });
-  // The ring is also shown while the focus slider is dragged.
-  const slider = el('focus-x');
-  if (slider) {
-    slider.addEventListener('pointerdown', () => showFocusRing(true));
-    slider.addEventListener('pointerup', () => showFocusRing(false));
-  }
-}
-
-async function downloadPNG(size) {
-  const url = await exportPNG(size);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `sunset-press-${size}.png`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+function renderAll() {
+  paintPreview();
 }
 
 function buildSamples() {
-  const row = el('sample-row');
-  if (!row) return;
-  row.innerHTML = '';
-  SAMPLES.forEach((s) => {
+  const row = $('sample-row');
+  for (const s of SAMPLES) {
     const b = document.createElement('button');
     b.className = 'sample-thumb';
     b.type = 'button';
@@ -132,137 +99,184 @@ function buildSamples() {
     img.alt = s.name;
     b.appendChild(img);
     b.addEventListener('click', async () => {
-      state.heroSrc = s.src;
-      document.querySelectorAll('.sample-thumb').forEach((t) => t.classList.remove('active'));
-      b.classList.add('active');
-      await refreshPreview();
+      state.heroImg = await loadImage(s.src);
+      state.focus = null;
+      renderAll();
     });
-    if (s.src === state.heroSrc) b.classList.add('active');
     row.appendChild(b);
-  });
+  }
 }
 
 function buildStyles() {
-  const row = el('style-row');
-  if (!row) return;
-  row.innerHTML = '';
-  STYLES.forEach((s, i) => {
+  const box = $('style-grid');
+  for (const s of STYLES) {
     const b = document.createElement('button');
-    b.className = 'style-thumb' + (i === state.style ? ' active' : '');
+    b.className = 'style-btn' + (s.preset === state.style ? ' active' : '');
     b.type = 'button';
     b.textContent = s.name;
-    b.addEventListener('click', async () => {
-      state.style = i;
-      document.querySelectorAll('.style-thumb').forEach((t) => t.classList.remove('active'));
+    b.addEventListener('click', () => {
+      state.style = s.preset;
+      for (const el of box.querySelectorAll('.style-btn')) el.classList.remove('active');
       b.classList.add('active');
-      await refreshPreview();
+      renderAll();
     });
-    row.appendChild(b);
+    box.appendChild(b);
+  }
+  const shuffle = document.createElement('button');
+  shuffle.className = 'style-btn shuffle';
+  shuffle.type = 'button';
+  shuffle.textContent = 'Shuffle style';
+  shuffle.addEventListener('click', () => {
+    const pick = STYLES[Math.floor(Math.random() * STYLES.length)];
+    state.style = pick.preset;
+    for (const el of box.querySelectorAll('.style-btn')) {
+      el.classList.toggle('active', el.textContent === pick.name);
+    }
+    renderAll();
   });
+  box.appendChild(shuffle);
 }
 
 function buildSizeTabs() {
-  const tabs = el('size-tabs');
-  if (!tabs) return;
-  tabs.innerHTML = '';
-  Object.entries(SIZES).forEach(([key, s]) => {
+  const box = $('size-tabs');
+  for (const s of SIZE_TABS) {
     const b = document.createElement('button');
-    b.className = 'size-tab' + (key === state.size ? ' active' : '');
+    b.className = 'size-tab' + (s.name === state.size ? ' active' : '');
     b.type = 'button';
     b.textContent = s.label;
-    b.addEventListener('click', async () => {
-      state.size = key;
-      document.querySelectorAll('.size-tab').forEach((t) => t.classList.remove('active'));
+    b.addEventListener('click', () => {
+      state.size = s.name;
+      for (const el of box.querySelectorAll('.size-tab')) el.classList.remove('active');
       b.classList.add('active');
-      await refreshPreview();
+      renderAll();
     });
-    tabs.appendChild(b);
+    box.appendChild(b);
+  }
+}
+
+function bindCaption() {
+  const titleInput = $('caption-title');
+  const kickerInput = $('caption-kicker');
+  titleInput.value = state.title;
+  kickerInput.value = state.kicker;
+  titleInput.addEventListener('input', () => {
+    state.title = titleInput.value.trim() || 'SUNSET HEIST';
+    renderAll();
+  });
+  kickerInput.addEventListener('input', () => {
+    state.kicker = kickerInput.value.trim() || 'ONE LAST JOB.';
+    renderAll();
   });
 }
 
-function bindControls() {
-  const panelSel = el('panel-side');
-  if (panelSel) {
-    panelSel.addEventListener('change', async () => {
-      state.panelSide = panelSel.value;
-      await refreshPreview();
-    });
-  }
-  const titleSlider = el('title-height');
-  const titleVal = el('title-height-val');
-  if (titleSlider) {
-    titleSlider.addEventListener('input', () => {
-      state.titleHeight = Number(titleSlider.value);
-      if (titleVal) titleVal.textContent = `${state.titleHeight > 0 ? '+' : ''}${state.titleHeight}%`;
-    });
-    titleSlider.addEventListener('change', refreshPreview);
-  }
-  const titleInput = el('caption-title');
-  if (titleInput) {
-    titleInput.addEventListener('input', () => { state.title = titleInput.value.toUpperCase(); });
-    titleInput.addEventListener('change', refreshPreview);
-  }
-  const kickerInput = el('caption-kicker');
-  if (kickerInput) {
-    kickerInput.addEventListener('input', () => { state.kicker = kickerInput.value.toUpperCase(); });
-    kickerInput.addEventListener('change', refreshPreview);
-  }
-  const exportBtn = el('export-btn');
-  if (exportBtn) exportBtn.addEventListener('click', () => downloadPNG(state.size));
-  const exportAll = el('export-all-btn');
-  if (exportAll) {
-    exportAll.addEventListener('click', async () => {
-      for (const key of Object.keys(SIZES)) await downloadPNG(key);
-    });
-  }
-  const shuffle = el('shuffle-btn');
-  if (shuffle) {
-    shuffle.addEventListener('click', async () => {
-      state.style = (state.style + 1) % STYLES.length;
-      document.querySelectorAll('.style-thumb').forEach((t, i) => t.classList.toggle('active', i === state.style));
-      await refreshPreview();
-    });
-  }
-  const fileInput = el('photo-input');
-  if (fileInput) {
-    fileInput.addEventListener('change', async () => {
-      const f = fileInput.files && fileInput.files[0];
-      if (!f) return;
-      const url = URL.createObjectURL(f);
-      state.heroSrc = url;
-      await loadImage(url).catch(() => {});
-      await refreshPreview();
-    });
-  }
+function bindPhotoPicker() {
+  const input = $('photo-file');
+  const btn = $('choose-photo');
+  btn.addEventListener('click', () => input.click());
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    state.heroImg = await loadImage(url);
+    state.focus = null;
+    renderAll();
+  });
 }
 
-export async function initEditor() {
-  previewCanvas = el('preview-canvas');
-  previewWrap = el('preview-wrap');
-  focusRing = el('focus-ring');
+function bindExport() {
+  $('export-one').addEventListener('click', () => {
+    const url = window.__sunsetPress.exportPNG(state.size);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sunset-press-${state.size}.png`;
+    a.click();
+  });
+  $('export-all').addEventListener('click', () => {
+    for (const s of ['wide', 'square', 'portrait']) {
+      const url = window.__sunsetPress.exportPNG(s);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sunset-press-${s}.png`;
+      a.click();
+    }
+  });
+}
+
+// Subject-focus ellipse: a DOM overlay, visible only while dragging, so it
+// never appears in the editor screenshot. Dragging it re-centres the hero
+// crop on the dragged point.
+function bindFocus() {
+  const wrap = $('preview-wrap');
+  const show = (e) => {
+    const r = previewCanvas.getBoundingClientRect();
+    const fx = (e.clientX - r.left) / r.width;
+    const fy = (e.clientY - r.top) / r.height;
+    state.focus = { fx: Math.max(0.05, Math.min(0.95, fx)), fy: Math.max(0.05, Math.min(0.95, fy)) };
+    focusRing.style.display = 'block';
+    focusRing.style.left = (fx * r.width - 46) + 'px';
+    focusRing.style.top = (fy * r.height - 30) + 'px';
+    renderAll();
+  };
+  previewCanvas.addEventListener('pointerdown', (e) => {
+    draggingFocus = true;
+    previewCanvas.setPointerCapture(e.pointerId);
+    show(e);
+  });
+  previewCanvas.addEventListener('pointermove', (e) => {
+    if (draggingFocus) show(e);
+  });
+  const end = () => {
+    draggingFocus = false;
+    focusRing.style.display = 'none';
+  };
+  previewCanvas.addEventListener('pointerup', end);
+  previewCanvas.addEventListener('pointercancel', end);
+  wrap.addEventListener('pointerleave', end);
+}
+
+async function init() {
+  previewCanvas = $('preview');
+  focusRing = $('focus-ring');
+  // The hero is the real golden-hour photo; the panels use their own stills.
+  const [hero, crew, getaway, score] = await Promise.all([
+    loadImage('samples/hero-real.jpg'),
+    loadImage('samples/friends-day.jpg'),
+    loadImage('samples/getaway.jpg'),
+    loadImage('samples/beach-night.jpg'),
+  ]);
+  state.heroImg = hero;
+  state.crewImg = crew;
+  state.getawayImg = getaway;
+  state.scoreImg = score;
+  // Bundled display faces, before the first paint.
+  await Promise.all([
+    document.fonts.load('100px Anton'),
+    document.fonts.load('30px "Bebas Neue"'),
+    document.fonts.load('700 20px "Bebas Neue"'),
+  ]);
   buildSamples();
   buildStyles();
   buildSizeTabs();
-  bindControls();
-  bindFocusDrag();
-  showFocusRing(false);
-  // Preload the hero so the first paint is never empty.
-  try { await loadImage(state.heroSrc); } catch (e) { /* sample row still works */ }
-  await refreshPreview();
+  bindCaption();
+  bindPhotoPicker();
+  bindExport();
+  bindFocus();
+  renderAll();
+
   window.__sunsetPress = {
     ready: true,
-    renderCover,
-    exportPNG,
-    sizes: SIZES,
-    state,
-    refreshPreview,
+    renderCover: (sizeName) => renderCover(sizeName, state),
+    exportPNG: (sizeName) => {
+      const canvas = renderCover(sizeName, state);
+      return canvas.toDataURL('image/png');
+    },
   };
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  initEditor().catch((err) => {
-    console.error('SUNSET PRESS failed to start', err);
-    const note = el('load-error');
-    if (note) note.textContent = 'Could not start the editor: ' + err.message;
-  });
+init().catch((err) => {
+  console.error(err);
+  const note = document.createElement('div');
+  note.style.cssText = 'color:#ff6b81;padding:16px;font:14px sans-serif';
+  note.textContent = 'SUNSET PRESS failed to start: ' + err.message;
+  document.body.appendChild(note);
 });

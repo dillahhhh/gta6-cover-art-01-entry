@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SUNSET PRESS — GTA-style cover art maker</title>
+<title>SUNSET PRESS — One photo in. A full key-art poster out.</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,63 +11,40 @@
   <div class="brand">SUNSET PRESS</div>
   <div class="tagline">One photo in. A full key-art poster out.</div>
 </header>
-<main class="editor">
-  <section class="preview-col">
-    <div id="preview-wrap" class="preview-wrap">
-      <canvas id="preview-canvas" width="1080" height="1080"></canvas>
-      <div id="focus-ring" class="focus-ring" title="Drag to move the subject focus"></div>
+<main class="layout">
+  <section class="stage-col">
+    <div class="preview-wrap" id="preview-wrap">
+      <canvas id="preview" width="620" height="620"></canvas>
+      <div class="focus-ring" id="focus-ring" style="display:none"></div>
     </div>
-    <div id="size-tabs" class="size-tabs"></div>
-    <p id="load-error" class="load-error"></p>
+    <div class="size-tabs" id="size-tabs"></div>
+    <div class="export-row">
+      <button type="button" class="export-btn" id="export-one">Export PNG</button>
+      <button type="button" class="export-btn ghost" id="export-all">Export all 3 sizes</button>
+    </div>
   </section>
   <aside class="controls">
-    <section class="panel">
-      <h2>1 · Your photo</h2>
-      <label class="file-btn">Choose a photo…
-        <input id="photo-input" type="file" accept="image/*">
-      </label>
-      <div id="sample-row" class="sample-row"></div>
+    <section class="card">
+      <h2><span class="step">1</span> · YOUR PHOTO</h2>
+      <button type="button" class="choose-btn" id="choose-photo">Choose a photo…</button>
+      <input type="file" id="photo-file" accept="image/*" hidden>
+      <div class="sample-row" id="sample-row"></div>
       <p class="hint">Or tap a sample. Photos never leave your machine.</p>
     </section>
-    <section class="panel">
-      <h2>2 · Poster style</h2>
-      <div id="style-row" class="style-row"></div>
-      <button id="shuffle-btn" type="button" class="btn ghost">Shuffle style</button>
+    <section class="card">
+      <h2><span class="step">2</span> · POSTER STYLE</h2>
+      <div class="style-grid" id="style-grid"></div>
     </section>
-    <section class="panel">
-      <h2>3 · Caption</h2>
-      <label class="field">Title
-        <input id="caption-title" type="text" value="SUNSET HEIST" maxlength="24">
-      </label>
-      <label class="field">Kicker
-        <input id="caption-kicker" type="text" value="ONE LAST JOB." maxlength="30">
-      </label>
-    </section>
-    <section class="panel">
-      <h2>4 · Layout</h2>
-      <label class="field">Panels
-        <select id="panel-side">
-          <option value="auto" selected>Auto (best side)</option>
-          <option value="left">Left</option>
-          <option value="right">Right</option>
-          <option value="off">Off</option>
-        </select>
-      </label>
-      <label class="field">Title height <span id="title-height-val">0%</span>
-        <input id="title-height" type="range" min="-10" max="10" step="1" value="0">
-      </label>
-      <label class="field">Subject focus (horizontal)
-        <input id="focus-x" type="range" min="0" max="100" step="1" value="62">
-      </label>
-      <p class="hint">Drag the dashed ellipse on the preview to move the subject focus. It never appears in exports.</p>
-    </section>
-    <section class="panel actions">
-      <button id="export-btn" type="button" class="btn primary">Export PNG</button>
-      <button id="export-all-btn" type="button" class="btn ghost">Export all 3 sizes</button>
+    <section class="card">
+      <h2><span class="step">3</span> · CAPTION</h2>
+      <label class="field-label" for="caption-title">Title</label>
+      <input class="field" id="caption-title" type="text" value="SUNSET HEIST" maxlength="24">
+      <label class="field-label" for="caption-kicker">Kicker</label>
+      <input class="field" id="caption-kicker" type="text" value="ONE LAST JOB." maxlength="32">
+      <p class="hint">Drag on the preview to move the subject focus. The title and footer are laid out from the bottom up, so they never cover a face.</p>
     </section>
   </aside>
 </main>
-<footer class="foot">SUNSET PRESS · Painted key art, made offline in your browser. Hero photo: Jace Ulloa (Unsplash). Fonts: Anton &amp; Bebas Neue (SIL OFL).</footer>
 <script type="module" src="src/ui.js"></script>
 </body>
 </html>

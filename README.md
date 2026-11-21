@@ -1,61 +1,64 @@
-# SUNSET PRESS — GTA-style cover art maker
+# SUNSET PRESS — a GTA 6-style cover maker
 
-One photo in. A full key-art poster out. SUNSET PRESS turns any photo into
-painted GTA-style cover art: a full-bleed hero, three supporting panels with
-their own colour grades, and a huge gold-to-pink wordmark — exported as a PNG
-in the three common post sizes (1080 × 1080, 1080 × 1350, 1920 × 1080).
+One photo in. A full key-art poster out.
+
+SUNSET PRESS is an offline browser web app that turns a person's photo and
+a caption into GTA 6-style cover art: a painted hero, a slanted three-panel
+stack (THE CREW / THE GETAWAY / THE SCORE), and a big gold-to-pink 3D title,
+exported as PNGs in the three common post sizes (1920×1080, 1080×1080,
+1080×1350). No network at runtime, no uploads — photos never leave the
+machine. Every file lives under `app/`.
 
 ## How it works
 
-- **Painted look, all canvas, no ML.** A smoothing pass, luminance posterize
-  (13–14 levels) with ordered dithering so skin never bands into contour
-  stripes, a sunset gradient map blended with the original photo so faces
-  and cars stay readable, full-resolution Sobel ink weakened inside the
-  face zone, light grain in the shadows, and a vignette.
-- **Full-bleed hero.** The hero photo covers the whole canvas edge to edge.
-  The panel stack sits on top of it, clipped to its own rect, and the title
-  overlaps the hero's lower body — never a face.
-- **Three panels, three grades.** THE CREW (warm sunset), THE GETAWAY
-  (magenta night), THE SCORE (bright teal dusk). Each panel is a real photo,
-  painted at output resolution, with a pill label.
-- **Editor.** Live preview, size tabs, six style presets, panel side
-  (Auto / Left / Right / Off), title-height control, subject-focus drag
-  (a DOM overlay shown only while dragging — it never appears in exports),
-  inline caption editing, one-click PNG export in all three sizes.
+- **Painted look** (`app/src/paint.js`): a hand-written canvas pipeline —
+  gentle smoothing, luminance posterize with dithering (so skin never shows
+  contour bands), a gradient map (shadows deep violet, mids magenta/coral,
+  highlights peach/gold) blended back with the original photo, a
+  full-resolution Sobel ink outline, and fine uniform grain. No halftone
+  dot pattern, so the sky stays clean.
+- **Cover renderer** (`app/src/render.js`): per-size layout. The hero is
+  painted full-bleed; the panel stack sits on the left with neon pink
+  borders and pill labels; the title block is laid out **bottom-up from
+  the footer**, so the footer always keeps its margin and the kicker and
+  title can never drift up onto a face. That bottom-up layout is the fix
+  for the wide cover, where the title used to cover the front subject's
+  mouth and chin.
+- **Editor** (`app/src/ui.js`, `app/index.html`): pick a photo or tap a
+  sample, pick one of six poster styles, type the caption, switch sizes,
+  drag on the preview to move the subject focus, export one size or all
+  three. The subject-focus ring is a drag-only DOM overlay and never
+  appears in exports or in the editor screenshot.
 
 ## Run it
 
-Serve `app/` with any static server, then open it in a desktop browser:
-
-```sh
-node serve.ts        # http://localhost:8080
 ```
-
-Everything is offline: every script, image and font is a file under `app/`.
-
-## Screenshots
-
-`shots4.py` renders all four with headless Chromium:
-
-```sh
-python3 shots4.py
+node serve.ts            # app/ on http://localhost:8080
+python3 shots4.py        # renders the 4 screenshots into screenshots/
 ```
 
 ## Hand it in
 
-```sh
-MAKEFUN_OUTPUT_DIR=out node main.ts
+```
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-## Credits
+`main.ts` copies `app/` and `screenshots/` to the output directory and
+writes `dossier.json` with the vendored make.fun library
+(`vendor/makefun-app.ts`).
 
-- Hero photo: Jace Ulloa, "two people at a lakeside at golden hour"
-  (Unsplash). Used under the Unsplash licence; not our photo, not claimed as
-  ours.
-- Fonts: Anton and Bebas Neue, both under the SIL Open Font License
-  (see `app/fonts/OFL.txt`).
-- Original work: no Rockstar Games logo, artwork, characters or fonts.
+## Photo credits
 
-## License
+- Hero photo (`app/samples/hero-real.jpg`): Jace Ulloa, via Unsplash —
+  two people at a lakeside at golden hour. Used as-is; not claimed as our
+  own.
+- The other sample photos in `app/samples/` are stand-ins shipped with
+  the app so the first screenshot is never empty.
 
-MIT — see `LICENSE`.
+## Notes
+
+- No Rockstar Games logo, wordmark, artwork, characters, or fonts are
+  used. The lettering is built from SIL OFL display faces bundled under
+  `app/fonts/` (Anton, Bebas Neue) and original shapes.
+- No ML, no model downloads, no CDN fonts, no remote images, no
+  analytics.
