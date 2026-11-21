@@ -1,176 +1,119 @@
 #!/usr/bin/env python3
-"""shots4.py — SUNSET PRESS screenshot driver (round 5, written fresh).
-
-Serves app/ on localhost, drives it in headless Chromium (Playwright),
-exports the 3 poster sizes at exact pixel dimensions, and captures the
-4 screenshots from shots.json. Verifies every limit:
-  - each screenshot <= 256 KiB, long side <= 1280 px, short side >= 480 px
-  - each export at its exact pixel size (1080x1080 / 1080x1350 / 1920x1080)
-  - zero console errors / page errors
-Prints ALL SHOTS OK on success, else the failures. Exit code 0/1.
-
+"""shots4.py — renders the 4 SUNSET PRESS screenshots with headless Chromium.
+Serves app/ locally, drives the editor through window.__sunsetPress, and
+saves each shot as a JPEG inside the 256 KiB / 1280px limits.
 Usage: python3 shots4.py [--port 8123]
+Exits non-zero if any shot is missing, oversized, or a console error fired.
 """
+import argparse
 import base64
 import io
 import json
+import os
 import subprocess
 import sys
 import time
-import urllib.request
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-SHOTS = json.loads((HERE / "shots.json").read_text())
-LIMITS = SHOTS["limits"]
-EXPORT_SIZES = {k: tuple(v) for k, v in SHOTS["export_sizes"].items()}
+REPO = os.path.dirname(os.path.abspath(__file__))
+APP_DIR = os.path.join(REPO, 'app')
+OUT_DIR = os.path.join(REPO, 'screenshots')
+MAX_BYTES = 262144
+LONG_MAX = 1280
+SHORT_MIN = 480
 
-# Screenshot output size per shot (long side <= 1280, short side >= 480).
-SHOT_OUT = {
-    "1-cover-wide": (1280, 720),
-    "2-cover": (1080, 1080),
-    "3-editor": (1280, 720),
-    "4-cover-portrait": (1024, 1280),
-}
-
-
-def data_url_to_image(url):
-    from PIL import Image
-    assert url.startswith("data:image/jpeg;base64,")
-    raw = base64.b64decode(url.split(",", 1)[1])
-    return Image.open(io.BytesIO(raw))
+EXPORT_SHOTS = [
+    ('wide', '1-cover-wide.jpg'),
+    ('square', '2-cover.jpg'),
+    ('portrait', '4-cover-portrait.jpg'),
+]
+EXPECTED_PX = {'wide': (1920, 1080), 'square': (1080, 1080), 'portrait': (1080, 1350)}
 
 
-def save_jpeg(img, path, quality=88):
-    """Save as JPEG within the byte cap, lowering quality if needed."""
-    from PIL import Image
-    q = quality
-    while q >= 55:
+def save_jpeg(pil_img, path):
+    """Resize to the limits and save as JPEG under MAX_BYTES."""
+    img = pil_img.convert('RGB')
+    w, h = img.size
+    scale = min(1.0, LONG_MAX / max(w, h))
+    if scale < 1.0:
+        img = img.resize((round(w * scale), round(h * scale)), Image.LANCZOS)
+    w, h = img.size
+    assert max(w, h) <= LONG_MAX, f'{path}: long side {max(w, h)} > {LONG_MAX}'
+    assert min(w, h) >= SHORT_MIN, f'{path}: short side {min(w, h)} < {SHORT_MIN}'
+    quality = 84
+    while quality >= 40:
         buf = io.BytesIO()
-        img.convert("RGB").save(buf, "JPEG", quality=q, optimize=True)
-        if len(buf.getvalue()) <= LIMITS["max_bytes"]:
-            Path(path).write_bytes(buf.getvalue())
-            return len(buf.getvalue()), q
-        q -= 6
-    # Last resort: shrink a little and retry once at 55.
-    small = img.resize((int(img.width * 0.9), int(img.height * 0.9)), Image.LANCZOS)
-    buf = io.BytesIO()
-    small.convert("RGB").save(buf, "JPEG", quality=55, optimize=True)
-    Path(path).write_bytes(buf.getvalue())
-    return len(buf.getvalue()), 55
+        img.save(buf, 'JPEG', quality=quality, optimize=True)
+        if len(buf.getvalue()) <= MAX_BYTES:
+            with open(path, 'wb') as f:
+                f.write(buf.getvalue())
+            return len(buf.getvalue()), img.size
+        quality -= 8
+    raise SystemExit(f'{path}: cannot fit under {MAX_BYTES} bytes')
 
 
 def main():
-    port = 8123
-    if "--port" in sys.argv:
-        port = int(sys.argv[sys.argv.index("--port") + 1])
+    global Image
+    from PIL import Image
     from playwright.sync_api import sync_playwright
 
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--port', type=int, default=8123)
+    args = ap.parse_args()
+
+    os.makedirs(OUT_DIR, exist_ok=True)
     server = subprocess.Popen(
-        [sys.executable, "-m", "http.server", str(port), "--directory", str(HERE / "app")],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+        [sys.executable, '-m', 'http.server', str(args.port), '--bind', '127.0.0.1'],
+        cwd=APP_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1.0)
     errors = []
     try:
-        # Wait for the server.
-        for _ in range(50):
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/index.html", timeout=1)
-                break
-            except Exception:
-                time.sleep(0.1)
-        else:
-            print("FAIL: local server did not come up")
-            return 1
-
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
-            page = browser.new_page(viewport={"width": 1280, "height": 720})
-            console_errors = []
-            page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
-            page.on("pageerror", lambda e: console_errors.append(str(e)))
-
-            # --- verify the 3 export sizes are exact ----------------------
-            page.goto(f"http://127.0.0.1:{port}/index.html?hero=samples/hero-real.jpg&size=square")
-            page.wait_for_function("window.SunsetPress && window.SunsetPress.ready", timeout=30000)
-            page.wait_for_function(
-                "window.SunsetPress.ready.then ? true : false", timeout=5000
-            )
-            # wait for the ready promise to settle
-            page.evaluate("window.SunsetPress.ready.catch(()=>{})")
-            page.wait_for_timeout(1500)
-            for key, (ew, eh) in EXPORT_SIZES.items():
-                url = page.evaluate(f"window.SunsetPress.exportDataURL('{key}', 0.92)")
-                img = data_url_to_image(url)
-                ok = img.size == (ew, eh)
-                print(f"export {key}: {img.size} expected {(ew, eh)} {'OK' if ok else 'FAIL'}")
-                if not ok:
-                    errors.append(f"export {key} size {img.size} != {(ew, eh)}")
-
-            # --- capture the 4 screenshots --------------------------------
-            outdir = HERE / "screenshots"
-            outdir.mkdir(exist_ok=True)
-            for shot in SHOTS["shots"]:
-                name, kind, size = shot["name"], shot["kind"], shot["size"]
-                hero = shot["hero"]
-                page.goto(
-                    f"http://127.0.0.1:{port}/index.html?hero={hero}&size={size}"
-                )
-                page.wait_for_function("window.SunsetPress && window.SunsetPress.ready", timeout=30000)
-                page.evaluate("window.SunsetPress.ready.catch(()=>{})")
-                page.wait_for_timeout(1500)
-                target = SHOT_OUT[name]
-                if kind == "cover":
-                    url = page.evaluate(f"window.SunsetPress.exportDataURL('{size}', 0.92)")
-                    img = data_url_to_image(url)
-                    img = img.resize(target, __import__("PIL.Image", fromlist=["LANCZOS"]).LANCZOS)
-                    path = outdir / f"{name}.jpg"
-                    nbytes, q = save_jpeg(img, path)
-                    print(f"{name}: {img.size} {nbytes} bytes q={q}")
-                else:  # editor: viewport screenshot of the app UI
-                    page.set_viewport_size({"width": 1280, "height": 720})
-                    page.wait_for_timeout(800)
-                    path = outdir / f"{name}.jpg"
-                    page.screenshot(path=str(path), type="jpeg", quality=88)
-                    from PIL import Image
-                    img = Image.open(path)
-                    nbytes = path.stat().st_size
-                    print(f"{name}: {img.size} {nbytes} bytes (viewport shot)")
-                # verify limits
-                from PIL import Image
-                im = Image.open(path)
-                long_side = max(im.size)
-                short_side = min(im.size)
-                nbytes = path.stat().st_size
-                if nbytes > LIMITS["max_bytes"]:
-                    errors.append(f"{name}: {nbytes} bytes > {LIMITS['max_bytes']}")
-                if long_side > LIMITS["long_max"]:
-                    errors.append(f"{name}: long side {long_side} > {LIMITS['long_max']}")
-                if short_side < LIMITS["short_min"]:
-                    errors.append(f"{name}: short side {short_side} < {LIMITS['short_min']}")
-
-            if console_errors:
-                print("CONSOLE ERRORS:")
-                for e in console_errors[:10]:
-                    print("  ", e)
-                errors.append(f"{len(console_errors)} console/page errors")
-
+            page = browser.new_page(viewport={'width': 1280, 'height': 720})
+            page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
+            page.on('pageerror', lambda e: errors.append(str(e)))
+            page.goto(f'http://127.0.0.1:{args.port}/', wait_until='networkidle')
+            page.wait_for_function('window.__sunsetPress && window.__sunsetPress.ready', timeout=60000)
+            # Let the preview finish painting.
+            page.wait_for_timeout(2500)
+            # Exact export sizes, straight from the canvas.
+            for size in ('wide', 'square', 'portrait'):
+                dims = page.evaluate(
+                    """async (s) => {
+                        const c = await window.__sunsetPress.renderCover(s);
+                        return [c.width, c.height];
+                    }""", size)
+                assert tuple(dims) == EXPECTED_PX[size], f'{size}: exported {dims}, expected {EXPECTED_PX[size]}'
+            # Exported covers.
+            for size, name in EXPORT_SHOTS:
+                data_url = page.evaluate(
+                    'async (s) => window.__sunsetPress.exportPNG(s)', size)
+                assert data_url.startswith('data:image/png;base64,'), f'{size}: bad data URL'
+                raw = base64.b64decode(data_url.split(',', 1)[1])
+                img = Image.open(io.BytesIO(raw))
+                path = os.path.join(OUT_DIR, name)
+                nbytes, dims = save_jpeg(img, path)
+                print(f'{name}: {dims[0]}x{dims[1]}, {nbytes} bytes')
+            # Editor shot: the app in a browser with the hero photo loaded.
+            page.set_viewport_size({'width': 1280, 'height': 720})
+            page.wait_for_timeout(1200)
+            editor_path = os.path.join(OUT_DIR, '3-editor.jpg')
+            page.screenshot(path=editor_path)
+            img = Image.open(editor_path)
+            nbytes, dims = save_jpeg(img, editor_path)
+            print(f'3-editor.jpg: {dims[0]}x{dims[1]}, {nbytes} bytes')
             browser.close()
     finally:
         server.terminate()
-        try:
-            server.wait(timeout=5)
-        except Exception:
-            server.kill()
+        server.wait(timeout=10)
 
     if errors:
-        print("FAILURES:")
+        print('CONSOLE ERRORS:', file=sys.stderr)
         for e in errors:
-            print(" -", e)
-        return 1
-    print("ALL SHOTS OK")
-    return 0
+            print(' -', e, file=sys.stderr)
+        raise SystemExit(1)
+    print('ALL SHOTS OK, 0 console errors')
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    main()
