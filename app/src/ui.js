@@ -45,6 +45,11 @@ function spDefaultState() {
     subtitle: 'VICE CITY · TONIGHT',
     tagline: 'One last job.',
     focus: { x: 0.68, y: 0.45 },
+    // Fix round 8: per-size title height (fraction of canvas height,
+    // + = down). Defaults clear the real-photo hero's low front face:
+    // square +0.03 (his chin grazed the wordmark), portrait +0.16
+    // (his eyes sat behind it), wide 0 (already clear).
+    titleY: { square: 0.03, portrait: 0.16, wide: 0 },
     // Sunset backdrop OFF by default (fix round 4, item 2): the hero is
     // one full photo; the procedural skyline is opt-in via the toggle.
     backdrop: false,
@@ -115,7 +120,8 @@ function spLayoutPx() {
   const H = dims.h * scale;
   // Fix round 5, item 1: same flip rule as the renderer — the overlay
   // rects must sit where the panels actually are.
-  const L = spLayoutFor(spState.size, !!(spState.focus && spState.focus.x > 0.5));
+  const L = spLayoutFor(spState.size, !!(spState.focus && spState.focus.x > 0.5),
+    (spState.titleY && spState.titleY[spState.size]) || 0);
   const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
   return { W, H, hero: R(L.hero), supports: L.supports.map(R), title: R(L.title), footer: R(L.footer) };
 }
@@ -124,11 +130,15 @@ async function spRenderPreview() {
   await spEnsureImages();
   await document.fonts.ready;
   const { W, H } = spLayoutPx();
-  const poster = spRenderPoster(spState, spState.size, spPreviewScale(), spImgMap);
+  // Fix round 8: paint the preview at up to 2x the display scale
+  // (capped at export size) and draw it down — the panels were painted
+  // at the small preview size and read soft/blurry in the editor shot.
+  const renderScale = Math.min(spPreviewScale() * 2, 1);
+  const poster = spRenderPoster(spState, spState.size, renderScale, spImgMap);
   preview.width = Math.round(W);
   preview.height = Math.round(H);
   pctx.clearRect(0, 0, preview.width, preview.height);
-  pctx.drawImage(poster, 0, 0);
+  pctx.drawImage(poster, 0, 0, preview.width, preview.height);
   spDrawOverlay();
   spStatus('Ready — ' + spState.photos.length + ' photos · ' + (SP_STYLES[spState.style].label) + ' · ' + spState.size);
 }
@@ -276,6 +286,11 @@ function spSyncInputs() {
   $('subtitleInput').value = spState.subtitle;
   $('taglineInput').value = spState.tagline;
   $('backdropToggle').checked = !!spState.backdrop;
+  // Fix round 8: the title-height slider follows the current size.
+  const ty = spState.titleY || {};
+  const cur = ty[spState.size] == null ? 0 : ty[spState.size];
+  $('titleYInput').value = Math.round(cur * 100);
+  $('titleYNote').textContent = 'Title height: ' + (cur > 0 ? '+' : '') + Math.round(cur * 100) + '%';
   spBuildLabels();
   spBuildStrip();
   spBuildThumbs();
@@ -428,6 +443,12 @@ function spApplyShotParams() {
   if (shot === 'portrait') spState.size = 'portrait';
   if (shot === 'wide') spState.size = 'wide';
   if (shot === 'cover' || shot === 'editor') spState.size = spState.size || 'square';
+  // Fix round 8: ?titley=+0.16 overrides the title height for the
+  // current size (fraction of canvas height, + = down).
+  if (q.get('titley') !== null) {
+    if (!spState.titleY) spState.titleY = { square: 0, portrait: 0, wide: 0 };
+    spState.titleY[spState.size] = parseFloat(q.get('titley')) || 0;
+  }
 }
 
 /* ---- wire the controls ---- */
@@ -457,6 +478,17 @@ $('subtitleInput').addEventListener('input', (e) => { spState.subtitle = e.targe
 $('subtitleInput').addEventListener('change', () => spPushUndo());
 $('taglineInput').addEventListener('input', (e) => { spState.tagline = e.target.value; spScheduleRender(); });
 $('taglineInput').addEventListener('change', () => spPushUndo());
+/* Fix round 8: title-height slider — moves the title (and the footer
+ * riding with it) for the current size only, so any photo's face can
+ * be cleared without touching the other sizes. */
+$('titleYInput').addEventListener('input', (e) => {
+  if (!spState.titleY) spState.titleY = { square: 0, portrait: 0, wide: 0 };
+  const cur = parseInt(e.target.value, 10) / 100;
+  spState.titleY[spState.size] = cur;
+  $('titleYNote').textContent = 'Title height: ' + (cur > 0 ? '+' : '') + Math.round(cur * 100) + '%';
+  spScheduleRender();
+});
+$('titleYInput').addEventListener('change', () => spPushUndo());
 document.querySelectorAll('#sizeTabs button').forEach((b) => {
   b.addEventListener('click', () => {
     if (spState.size === b.dataset.size) return;

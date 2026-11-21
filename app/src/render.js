@@ -31,8 +31,16 @@ const SP_SIZES = {
  * of a 0.73 stack at any zoom that still covers the canvas).
  * `flip` mirrors the stack to the LEFT when the
  * subject focus sits right of centre (focus.x > 0.5): the subject
- * is never covered, whatever photo is loaded. */
-function spLayoutFor(sizeName, flip) {
+ * is never covered, whatever photo is loaded.
+ *
+ * Fix round 8: per-size title height. `titleDY` moves the title band
+ * (and the footer riding with it) down by a fraction of the canvas
+ * height, + = down, so the wordmark can clear a low face — the
+ * real-photo hero's front face sits low, and the fixed bands put the
+ * wordmark across his mouth in square and his eyes in portrait. The
+ * footer rides with the title so the tagline never lands on it, and
+ * is clamped to keep the footer band inside the canvas. */
+function spLayoutFor(sizeName, flip, titleDY) {
   // (fix round 2, item 8: the portrait band was too tall — the tagline
   // sat ~200 px above the footer with dead air between them. The band
   // is shorter now and the footer rides up to meet it.)
@@ -77,6 +85,11 @@ function spLayoutFor(sizeName, flip) {
       title: { x: 0, y: 0.665, w: 1, h: 0.24 },
       footer: { x: 0, y: 0.915, w: 1, h: 0.085 },
     };
+  }
+  const dy = titleDY || 0;
+  if (dy) {
+    layout.title.y += dy;
+    layout.footer.y = Math.min(1 - layout.footer.h, layout.footer.y + dy);
   }
   if (flip) {
     layout.supports = layout.supports.map((f) => ({ ...f, x: 1 - f.x - f.w }));
@@ -261,7 +274,10 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   // subject focus sits right of centre, so the subject is never
   // covered, whatever photo is loaded.
   const flipPanels = !!(state.focus && state.focus.x > 0.5);
-  const L = spLayoutFor(sizeName, flipPanels);
+  // Fix round 8: per-size title height from state (0 if unset, e.g.
+  // a saved state from before the control existed).
+  const titleDY = (state.titleY && state.titleY[sizeName]) || 0;
+  const L = spLayoutFor(sizeName, flipPanels, titleDY);
   const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
 
   const canvas = spCanvas(W, H);
@@ -363,9 +379,15 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
     // branch of spPaintPhoto.)
     const isShore = state.photos[panel.photo] === 'samples/beach-night.jpg'
       || state.photos[panel.photo] === 'samples/palm-beach.jpg';
-    let filt = 'none';
-    if (sizeName === 'wide') filt = 'brightness(1.12) saturate(0.92)';
-    if (isShore) filt = (sizeName === 'wide' ? 'brightness(1.12) ' : '') + 'saturate(1.25)';
+    // Fix round 8: THE SCORE (group-night) reads dark — +20% brightness
+    // in every size. The wide 1.12 lift stays for the other panels.
+    const isScore = state.photos[panel.photo] === 'samples/group-night.jpg';
+    let bright = sizeName === 'wide' ? 1.12 : 1;
+    let sat = sizeName === 'wide' ? 0.92 : 1;
+    if (isScore) bright = Math.max(bright, 1.2);
+    if (isShore) sat = 1.25;
+    const filt = (bright !== 1 || sat !== 1)
+      ? 'brightness(' + bright.toFixed(2) + ') saturate(' + sat.toFixed(2) + ')' : 'none';
     if (filt !== 'none') ctx.filter = filt;
     ctx.drawImage(painted, p.x, p.y, p.w, p.h);
     ctx.filter = 'none';

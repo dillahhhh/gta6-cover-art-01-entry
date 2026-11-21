@@ -83,6 +83,10 @@ body {
   font-size: 14px;
 }
 .field input:focus { outline: 2px solid #ff2e88; border-color: #ff2e88; }
+/* Fix round 8: the title-height slider — keep it compact (the sidebar
+ * must still fit a 900 px viewport) and pink. */
+.field input[type="range"] { padding: 0; accent-color: #ff2e88; cursor: pointer; }
+.field .hint { display: block; margin: 2px 0 0; }
 .labels { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 .labels input {
   width: 100%; padding: 5px 6px; background: #1c0a28; border: 1px solid #3a1a52;
