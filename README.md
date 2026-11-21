@@ -28,6 +28,15 @@ through a sunset gradient, a thin dark ink line is laid on the strong edges,
 and a little of the real photo is blended back so faces stay readable. Grain
 is kept very light on purpose.
 
+## Layout
+
+The wide cover puts the title and kicker bottom-left, over the lake water,
+well clear of both faces; the three panels stack bottom-right, below the
+second man's chin and right of the front man's face. Square and portrait
+put the kicker just below the front man's chin (about 10px in square,
+about 20px in portrait) and the panels in a row under the title, so no
+panel ever covers a head.
+
 ## Run it
 
 ```sh
@@ -35,7 +44,7 @@ node serve.ts            # serves app/ on http://localhost:8080
 ```
 
 No build step, no network at runtime: every script, font and sample photo is
-a file under `app/`. Screenshots are taken with `python3 shots4.py`.
+a file under `app/`. Screenshots are taken with `python3 shots9.py`.
 
 ## Hand in
 

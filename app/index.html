@@ -1,62 +1,218 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SUNSET PRESS — one photo in, a full key-art poster out</title>
-<link rel="stylesheet" href="./style.css">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="brand">
-  <h1>SUNSET PRESS</h1>
-  <p>One photo in. A full key-art poster out.</p>
+<header class="topbar">
+  <div class="brand">SUNSET PRESS</div>
+  <div class="tagline">One photo in. A full key-art poster out.</div>
+  <button id="makeBtn" class="big-cta">Make My Cover</button>
 </header>
-<main class="layout">
-  <section class="stage">
-    <canvas id="preview" width="1080" height="1080" aria-label="Live poster preview"></canvas>
-    <p class="hint">Drag the poster to pan the hero · scroll to zoom it</p>
+
+<main id="editor">
+  <section class="stage-wrap">
+    <canvas id="stage"></canvas>
+    <div class="size-tabs" role="tablist">
+      <button data-size="square" class="tab active">Square 1080&times;1080</button>
+      <button data-size="portrait" class="tab">Portrait 1080&times;1350</button>
+      <button data-size="wide" class="tab">Wide 1920&times;1080</button>
+    </div>
   </section>
+
   <aside class="controls">
     <section class="card">
-      <h2><span>1</span> · Your photo</h2>
-      <label class="file-btn">Choose a photo…
-        <input id="photoFile" type="file" accept="image/*">
+      <h2>1 &middot; Your photo</h2>
+      <div class="samples" id="samples"></div>
+      <label class="file-btn">Upload a photo
+        <input type="file" id="upload" accept="image/*" hidden>
       </label>
-      <div id="sampleRow" class="thumbs"></div>
-      <p class="note">Or tap a sample. Photos never leave your machine.</p>
     </section>
+
     <section class="card">
-      <h2><span>2</span> · Poster style</h2>
-      <div id="styleRow" class="style-grid"></div>
-      <button id="shuffleStyle" type="button" class="wide-btn">Shuffle style</button>
+      <h2>2 &middot; Poster style</h2>
+      <div class="styles" id="styles"></div>
+      <button id="shuffleBtn" class="ghost-btn">Shuffle style</button>
     </section>
+
     <section class="card">
-      <h2><span>3</span> · Caption</h2>
-      <label>Title
-        <input id="titleInput" type="text" maxlength="24" value="SUNSET HEIST">
-      </label>
-      <label>Kicker
-        <input id="kickerInput" type="text" maxlength="32" value="ONE LAST JOB.">
-      </label>
+      <h2>3 &middot; Caption</h2>
+      <label>Title <input id="titleInput" value="SUNSET HEIST" maxlength="24"></label>
+      <label>Kicker <input id="kickerInput" value="ONE LAST JOB." maxlength="40"></label>
       <label>Title height
-        <input id="titleShift" type="range" min="-1" max="1" step="0.05" value="0">
+        <input id="titleHeight" type="range" min="-6" max="6" value="0" step="1">
+        <span id="titleHeightVal">0%</span>
+      </label>
+      <label>Panels
+        <select id="panelsSide">
+          <option value="auto" selected>Auto</option>
+          <option value="left">Left</option>
+          <option value="right">Right</option>
+          <option value="off">Off</option>
+        </select>
       </label>
     </section>
+
     <section class="card">
-      <h2><span>4</span> · Panels</h2>
-      <label>The Crew <select id="crewSelect"></select></label>
-      <label>The Getaway <select id="getawaySelect"></select></label>
-      <label>The Score <select id="scoreSelect"></select></label>
-    </section>
-    <section class="card">
-      <h2><span>5</span> · Size &amp; export</h2>
-      <div id="sizeTabs" class="size-tabs"></div>
-      <button id="exportBtn" type="button" class="cta">Export PNG</button>
-      <button id="exportAllBtn" type="button" class="wide-btn">Export all 3 sizes</button>
-      <p id="status" role="status">Loading…</p>
+      <h2>4 &middot; Export</h2>
+      <div class="export-row">
+        <button class="export-btn" data-export="square">PNG Square</button>
+        <button class="export-btn" data-export="portrait">PNG Portrait</button>
+        <button class="export-btn" data-export="wide">PNG Wide</button>
+      </div>
+      <button id="exportAll" class="big-cta">Export all 3 PNGs</button>
     </section>
   </aside>
 </main>
-<script type="module" src="./src/main.js"></script>
+
+<script src="src/paint.js"></script>
+<script src="src/poster.js"></script>
+<script>
+(function () {
+  "use strict";
+  var SAMPLES = [
+    ["hero-real.jpg", "Lakeside duo"],
+    ["friends-day.jpg", "Friends day"],
+    ["group-night.jpg", "Group night"],
+    ["getaway.jpg", "Getaway"],
+    ["palm-beach.jpg", "Palm beach"],
+  ];
+  var STYLE_NAMES = [
+    ["sunset", "Sunset"], ["neon", "Neon Night"], ["teal", "Teal Dusk"],
+    ["warm", "Warm Crew"], ["golden", "Golden Hour"], ["vice", "Vice Nights"],
+  ];
+
+  var params = new URLSearchParams(location.search);
+  var shotMode = params.get("shot"); // wide | square | portrait | null
+  var state = { size: "square", style: "sunset", hero: "hero-real.jpg" };
+
+  var stage = document.getElementById("stage");
+
+  function render() {
+    return SPPPoster.renderPoster(stage, state.size, { style: state.style });
+  }
+
+  function download(canvas, name) {
+    canvas.toBlob(function (blob) {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+    }, "image/png");
+  }
+
+  if (shotMode) {
+    // Headless screenshot mode: render one poster full-viewport, no editor.
+    // (The stage canvas lives inside #editor, so only the chrome around it
+    // is hidden — hiding #editor itself would hide the canvas too.)
+    document.querySelector(".topbar").style.display = "none";
+    document.querySelector(".controls").style.display = "none";
+    document.querySelector(".size-tabs").style.display = "none";
+    var ed = document.getElementById("editor");
+    ed.style.display = "block";
+    ed.style.padding = "0";
+    ed.style.gridTemplateColumns = "1fr";
+    document.body.style.margin = "0";
+    // Canvas shows at its own pixel size; the screenshot viewport is set
+    // to the export size, so the element fills the frame exactly.
+    stage.style.border = "none";
+    stage.style.borderRadius = "0";
+    state.size = shotMode;
+    render().then(function () {
+      document.title = "ready";
+      stage.setAttribute("data-ready", "1");
+    });
+    return;
+  }
+
+  // ---- editor wiring ----
+  var samplesEl = document.getElementById("samples");
+  SAMPLES.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.className = "sample-card" + (i === 0 ? " selected" : "");
+    b.innerHTML = '<img src="samples/' + s[0] + '" alt="">' +
+      '<span>' + s[1] + '</span>';
+    b.addEventListener("click", function () {
+      state.hero = s[0];
+      samplesEl.querySelectorAll(".sample-card").forEach(function (el) { el.classList.remove("selected"); });
+      b.classList.add("selected");
+      render();
+    });
+    samplesEl.appendChild(b);
+  });
+
+  var stylesEl = document.getElementById("styles");
+  STYLE_NAMES.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.className = "style-card" + (i === 0 ? " selected" : "");
+    b.textContent = s[1];
+    b.addEventListener("click", function () {
+      state.style = s[0];
+      stylesEl.querySelectorAll(".style-card").forEach(function (el) { el.classList.remove("selected"); });
+      b.classList.add("selected");
+      render();
+    });
+    stylesEl.appendChild(b);
+  });
+
+  document.getElementById("shuffleBtn").addEventListener("click", function () {
+    var keys = Object.keys(SPPPoster.STYLES);
+    state.style = keys[Math.floor(Math.random() * keys.length)];
+    stylesEl.querySelectorAll(".style-card").forEach(function (el) {
+      el.classList.toggle("selected", el.textContent === state.style);
+    });
+    render();
+  });
+
+  document.querySelectorAll(".size-tabs .tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      state.size = tab.dataset.size;
+      document.querySelectorAll(".size-tabs .tab").forEach(function (t) { t.classList.remove("active"); });
+      tab.classList.add("active");
+      render();
+    });
+  });
+
+  document.getElementById("makeBtn").addEventListener("click", render);
+  document.getElementById("exportAll").addEventListener("click", function () {
+    var sizes = ["square", "portrait", "wide"];
+    var i = 0;
+    (function next() {
+      if (i >= sizes.length) return;
+      var c = document.createElement("canvas");
+      SPPPoster.renderPoster(c, sizes[i], { style: state.style }).then(function () {
+        download(c, "sunset-press-" + sizes[i] + ".png");
+        i++; setTimeout(next, 300);
+      });
+    })();
+  });
+  document.querySelectorAll(".export-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var c = document.createElement("canvas");
+      SPPPoster.renderPoster(c, btn.dataset.export, { style: state.style }).then(function () {
+        download(c, "sunset-press-" + btn.dataset.export + ".png");
+      });
+    });
+  });
+
+  document.getElementById("upload").addEventListener("change", function (ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    var url = URL.createObjectURL(f);
+    var img = new Image();
+    img.onload = function () {
+      state.hero = url;
+      render();
+    };
+    img.src = url;
+  });
+
+  render();
+})();
+</script>
 </body>
 </html>
