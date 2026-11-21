@@ -1,127 +1,90 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SUNSET PRESS — One photo in. A full key-art poster out.</title>
+<title>SUNSET PRESS — GTA 6 Cover Art Maker</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="shotStage" hidden></div>
 <header class="topbar">
   <div class="brand">
-    <span class="brand-mark">SUNSET PRESS</span>
-    <span class="brand-tag">One photo in. A full key-art poster out.</span>
+    <span class="brand-mark">★</span>
+    <div>
+      <h1>SUNSET PRESS</h1>
+      <p class="tagline">One photo in. A full key-art poster out.</p>
+    </div>
   </div>
   <div class="top-actions">
-    <button id="undoBtn" type="button" title="Undo (Ctrl+Z)">↩ Undo</button>
-    <button id="redoBtn" type="button" title="Redo (Ctrl+Shift+Z)">↪ Redo</button>
+    <button id="undo" class="btn ghost" title="Undo">Undo</button>
+    <button id="redo" class="btn ghost" title="Redo">Redo</button>
+    <button id="shuffle" class="btn ghost" title="Shuffle style">Shuffle style</button>
+    <button id="exportOne" class="btn">Export PNG</button>
+    <button id="exportAll" class="btn primary">Export all 3 sizes</button>
   </div>
 </header>
 
 <main class="layout">
   <section class="stage-col">
     <div id="previewWrap" class="preview-wrap">
-      <canvas id="preview" width="860" height="860"></canvas>
+      <canvas id="preview"></canvas>
+      <div id="focusHandle" class="focus-handle" title="Drag to move the Subject Focus (keeps faces in frame)"></div>
     </div>
-    <p id="status" class="status" role="status">Loading…</p>
-    <div class="export-row">
-      <button id="makeCoverBtn" type="button" class="hero-btn">Make My Cover</button>
-      <label class="export-one">
-        <select id="exportSize" aria-label="Export size">
-          <option value="square">1080 × 1080</option>
-          <option value="portrait">1080 × 1350</option>
-          <option value="wide">1920 × 1080</option>
-        </select>
-        <button id="exportOneBtn" type="button">Export PNG</button>
-      </label>
-      <button id="exportAllBtn" type="button">Export all 3 sizes</button>
+    <p class="hint">Click a panel to select it, then drag to pan and scroll to zoom. Drag the dashed ellipse to move the Subject Focus.</p>
+    <div class="size-row">
+      <span class="label">Size</span>
+      <div id="sizeTabs" class="chips"></div>
     </div>
+    <div id="panelList" class="chips"></div>
   </section>
 
   <aside class="controls">
-    <section class="panel">
+    <section class="card">
       <h2>1 · Photo</h2>
-      <p class="hint">Drop in any photo — one fills every panel. Drag the preview to pan, scroll to zoom.</p>
-      <div id="photoStrip" class="photo-strip">
-        <button type="button" data-photo="hero-real.jpg">Lakeside duo</button>
-        <button type="button" data-photo="heist-duo.jpg">Heist duo</button>
-        <button type="button" data-photo="group-night.jpg">Group night</button>
-        <button type="button" data-photo="friends-day.jpg">Friends day</button>
-        <button type="button" data-photo="selfie-day.jpg">Selfie day</button>
-        <button type="button" data-photo="getaway.jpg">Getaway</button>
-        <button type="button" data-photo="beach-night.jpg">Beach night</button>
-        <button type="button" data-photo="hotel-night.jpg">Hotel night</button>
+      <div id="dropzone" class="dropzone" tabindex="0">
+        Drop a photo here, or click to pick one.
+        <input id="fileInput" type="file" accept="image/*" hidden>
       </div>
-      <input id="uploadInput" type="file" accept="image/*" hidden>
-      <button id="uploadBtn" type="button" class="ghost-btn">Upload your own photo…</button>
+      <div id="samples" class="samples"></div>
+      <p class="note">Photos never leave your machine. Everything runs offline.</p>
     </section>
 
-    <section class="panel">
-      <h2>2 · Poster style</h2>
-      <div id="styleRow" class="style-row">
-        <button type="button" data-preset="sunset"><canvas width="168" height="104"></canvas><span>Sunset</span></button>
-        <button type="button" data-preset="neon"><canvas width="168" height="104"></canvas><span>Neon Night</span></button>
-        <button type="button" data-preset="teal"><canvas width="168" height="104"></canvas><span>Teal Dusk</span></button>
-        <button type="button" data-preset="mono"><canvas width="168" height="104"></canvas><span>Mono Pink</span></button>
-      </div>
+    <section class="card">
+      <h2>2 · Style</h2>
+      <div id="styles" class="styles"></div>
     </section>
 
-    <section class="panel">
+    <section class="card">
       <h2>3 · Caption</h2>
       <label class="field">Title
-        <input id="titleInput" type="text" value="SUNSET HEIST" maxlength="28" autocomplete="off">
+        <input id="titleInput" type="text" maxlength="24" autocomplete="off">
       </label>
-      <label class="field">Kicker above the title
-        <input id="kickerInput" type="text" value="ONE LAST JOB." maxlength="40" autocomplete="off">
+      <label class="field">Kicker
+        <input id="kickerInput" type="text" maxlength="40" autocomplete="off">
       </label>
-      <label class="field">Subtitle (footer line)
-        <input id="subtitleInput" type="text" value="VICE CITY · TONIGHT" maxlength="40" autocomplete="off">
+      <label class="field">Footer
+        <input id="footerInput" type="text" maxlength="60" autocomplete="off">
       </label>
-      <label class="field">Footer wordmark
-        <input id="footerInput" type="text" value="SUNSET PRESS" maxlength="24" autocomplete="off">
+      <label class="field">Title height
+        <input id="titleHeight" type="range" min="0" max="100" value="50">
       </label>
-    </section>
-
-    <section class="panel">
-      <h2>4 · Panels</h2>
-      <p class="hint">Supporting panels down one side. Auto picks the side that never covers a face.</p>
-      <div id="panelsSeg" class="seg" role="group" aria-label="Panel side">
-        <button type="button" data-panels="auto">Auto</button>
-        <button type="button" data-panels="left">Left</button>
-        <button type="button" data-panels="right">Right</button>
-        <button type="button" data-panels="off">Off</button>
-      </div>
-      <label class="check">
-        <input id="backdropToggle" type="checkbox"> Sunset Backdrop (procedural Vice City sky)
-      </label>
-    </section>
-
-    <section class="panel">
-      <h2>5 · Title height</h2>
-      <p class="hint">Nudge the title band up or down so it never sits on a face.</p>
-      <div class="slider-row">
-        <input id="titleLift" type="range" min="-100" max="100" step="1" value="0">
-        <span id="titleLiftVal">0%</span>
+      <div class="row">
+        <span class="label">Panels</span>
+        <div id="panelsToggle" class="chips"></div>
       </div>
     </section>
 
-    <section class="panel">
-      <h2>6 · Post size</h2>
-      <div id="sizeTabs" class="seg" role="group" aria-label="Post size">
-        <button type="button" data-size="square">1:1 Square</button>
-        <button type="button" data-size="portrait">4:5 Portrait</button>
-        <button type="button" data-size="wide">16:9 Wide</button>
-      </div>
-      <p class="hint">Each size re-lays the poster — nothing is just re-cropped.</p>
+    <section class="card">
+      <h2>About this poster</h2>
+      <p class="note">A painted key-art engine: every photo is smoothed, posterized
+      and gradient-mapped into flat illustration, then set in a multi-panel
+      Vice City layout with original OFL lettering. Export is a clean PNG
+      at 1080×1080, 1080×1350 or 1920×1080.</p>
     </section>
   </aside>
 </main>
 
-<footer class="footnote">
-  SUNSET PRESS turns one photo into key art, offline, in your browser. Fonts: Anton &amp; Bebas Neue (SIL Open Font License).
-  Cover photo: Jace Ulloa via Unsplash. No Rockstar Games artwork, logo or font.
-</footer>
+<footer class="statusbar"><span id="status">Loading…</span></footer>
 
 <script type="module" src="src/ui.js"></script>
 </body>

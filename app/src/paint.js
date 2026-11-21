@@ -1,252 +1,333 @@
-// paint.js — SUNSET PRESS painted-look pipeline (hand-written canvas, no libraries).
-// One photo in, flat "ink and paint" poster art out: smooth, posterize, gradient-map,
-// ink outline, grain, vignette. Plus the procedural Vice City sunset backdrop.
+// paint.js — SUNSET PRESS "ink and paint" pipeline.
+//
+// Turns an ordinary photo into flat painted key art, all in Canvas 2D:
+//   smooth (box blur) -> posterize luminance -> gradient map -> ink outline
+//   (full-resolution Sobel) -> fine grain.
+//
+// Two hard lessons baked in here (Claude review of round 4, 21 Nov):
+//   FIX 1 — the ink edge field is computed at FULL output resolution.
+//   Round 4 computed it at 1/4 resolution and nearest-sampled it back up,
+//   which turned every outline into visible 4x4 px blocks on faces
+//   (eyes/mouths in THE CREW panel and the editor preview). We never
+//   downsample the edge field. Ink is also weakened inside the face zone
+//   (the Subject Focus ellipse), so faces keep their features.
+//   FIX 2 — the hero is painted GENTLY. Round 4 pushed the hero as hard
+//   as the panels: leaves and sky collapsed into noise clumps with broken
+//   yellow outlines and faces "melted" under a gold halo. The hero gets
+//   more smoothing, more posterize levels, weaker ink and a softer
+//   gradient map, so it stays clean with smooth golden-hour light.
+//
+// No ML, no network, no library. Pure canvas + ImageData math.
 
 export const PRESETS = {
   sunset: {
     label: 'Sunset',
-    levels: 7, strength: 0.52, sat: 1.18, bright: 1.04, warm: 0.10,
-    stops: [[0, 38, 14, 66], [0.28, 122, 32, 96], [0.55, 216, 74, 110], [0.8, 255, 158, 96], [1, 255, 214, 130]],
+    levels: 8,
+    smooth: 2,
+    ink: 0.5,
+    inkThreshold: 0.14,
+    mapStrength: 0.9,
+    grain: 0.05,
+    // deep violet -> magenta -> coral -> peach -> gold
+    stops: [
+      [0.0, 26, 11, 46],
+      [0.3, 123, 45, 139],
+      [0.58, 232, 93, 117],
+      [0.82, 249, 168, 106],
+      [1.0, 255, 217, 138],
+    ],
   },
   neon: {
     label: 'Neon Night',
-    levels: 6, strength: 0.58, sat: 1.28, bright: 1.0, warm: 0.0,
-    stops: [[0, 12, 14, 48], [0.3, 96, 26, 128], [0.58, 178, 58, 158], [0.82, 255, 120, 190], [1, 125, 243, 232]],
+    levels: 7,
+    smooth: 2,
+    ink: 0.62,
+    inkThreshold: 0.12,
+    mapStrength: 0.92,
+    grain: 0.06,
+    stops: [
+      [0.0, 8, 6, 32],
+      [0.3, 96, 24, 130],
+      [0.55, 214, 36, 140],
+      [0.8, 255, 92, 168],
+      [1.0, 120, 240, 255],
+    ],
   },
   teal: {
     label: 'Teal Dusk',
-    levels: 7, strength: 0.5, sat: 1.12, bright: 1.03, warm: 0.04,
-    stops: [[0, 8, 34, 46], [0.3, 34, 96, 110], [0.58, 64, 142, 138], [0.82, 255, 190, 130], [1, 255, 226, 160]],
+    levels: 7,
+    smooth: 2,
+    ink: 0.55,
+    inkThreshold: 0.13,
+    mapStrength: 0.9,
+    grain: 0.05,
+    stops: [
+      [0.0, 6, 26, 38],
+      [0.3, 14, 94, 110],
+      [0.58, 64, 170, 158],
+      [0.82, 240, 200, 140],
+      [1.0, 255, 236, 190],
+    ],
   },
   mono: {
     label: 'Mono Pink',
-    levels: 6, strength: 0.55, sat: 0.92, bright: 1.05, warm: 0.06,
-    stops: [[0, 24, 24, 34], [0.32, 96, 52, 84], [0.6, 168, 92, 122], [0.84, 244, 168, 200], [1, 255, 226, 238]],
+    levels: 6,
+    smooth: 2,
+    ink: 0.45,
+    inkThreshold: 0.15,
+    mapStrength: 0.9,
+    grain: 0.06,
+    stops: [
+      [0.0, 30, 8, 38],
+      [0.35, 122, 30, 96],
+      [0.65, 214, 84, 150],
+      [1.0, 255, 205, 225],
+    ],
+  },
+  golden: {
+    label: 'Golden Hour',
+    levels: 9,
+    smooth: 3,
+    ink: 0.35,
+    inkThreshold: 0.16,
+    mapStrength: 0.75,
+    grain: 0.04,
+    stops: [
+      [0.0, 38, 20, 44],
+      [0.3, 128, 62, 96],
+      [0.58, 214, 116, 92],
+      [0.82, 246, 178, 110],
+      [1.0, 255, 226, 160],
+    ],
+  },
+  noir: {
+    label: 'Vice Noir',
+    levels: 7,
+    smooth: 2,
+    ink: 0.7,
+    inkThreshold: 0.11,
+    mapStrength: 0.9,
+    grain: 0.07,
+    stops: [
+      [0.0, 6, 6, 12],
+      [0.35, 70, 22, 72],
+      [0.65, 168, 48, 96],
+      [1.0, 250, 214, 200],
+    ],
   },
 };
 
-function lerp(a, b, t) { return a + (b - a) * t; }
-
-function mapStops(stops, t) {
-  for (let i = 0; i < stops.length - 1; i++) {
-    const a = stops[i], b = stops[i + 1];
-    if (t <= b[0]) {
-      const k = b[0] === a[0] ? 0 : (t - a[0]) / (b[0] - a[0]);
-      return [lerp(a[1], b[1], k), lerp(a[2], b[2], k), lerp(a[3], b[3], k)];
+/** Separable box blur on ImageData (RGB; alpha untouched). O(n) per pass. */
+function boxBlur(data, w, h, radius) {
+  const tmp = new Float32Array(data.length);
+  const win = radius * 2 + 1;
+  // horizontal pass
+  for (let y = 0; y < h; y++) {
+    let sr = 0, sg = 0, sb = 0;
+    const row = y * w * 4;
+    for (let x = -radius; x <= radius; x++) {
+      const cx = Math.min(w - 1, Math.max(0, x));
+      const i = row + cx * 4;
+      sr += data[i]; sg += data[i + 1]; sb += data[i + 2];
+    }
+    for (let x = 0; x < w; x++) {
+      const i = row + x * 4;
+      tmp[i] = sr / win; tmp[i + 1] = sg / win; tmp[i + 2] = sb / win;
+      tmp[i + 3] = data[i + 3];
+      const xa = Math.min(w - 1, x + radius + 1);
+      const xr = Math.max(0, x - radius);
+      const ia = row + xa * 4;
+      const ir = row + xr * 4;
+      sr += data[ia] - data[ir];
+      sg += data[ia + 1] - data[ir + 1];
+      sb += data[ia + 2] - data[ir + 2];
     }
   }
-  const last = stops[stops.length - 1];
-  return [last[1], last[2], last[3]];
-}
-
-// Cheap two-pass box blur through a half-size canvas: flattens photo detail into paint regions.
-function smoothStep(src, w, h, scale) {
-  const sw = Math.max(2, Math.round(w * scale));
-  const sh = Math.max(2, Math.round(h * scale));
-  const small = document.createElement('canvas');
-  small.width = sw; small.height = sh;
-  const sctx = small.getContext('2d');
-  sctx.imageSmoothingEnabled = true;
-  sctx.imageSmoothingQuality = 'high';
-  sctx.drawImage(src, 0, 0, sw, sh);
-  const out = document.createElement('canvas');
-  out.width = w; out.height = h;
-  const octx = out.getContext('2d');
-  octx.imageSmoothingEnabled = true;
-  octx.imageSmoothingQuality = 'high';
-  octx.drawImage(small, 0, 0, w, h);
-  return out;
-}
-
-function luminance(r, g, b) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
-
-// Sobel edge strength on a small luminance grid; returns a 0..1 Float32Array.
-function edgeField(img, w, h) {
-  const d = img.data;
-  const lum = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) lum[i] = luminance(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) / 255;
-  const out = new Float32Array(w * h);
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      const gx = -lum[i - w - 1] - 2 * lum[i - 1] - lum[i + w - 1] + lum[i - w + 1] + 2 * lum[i + 1] + lum[i + w + 1];
-      const gy = -lum[i - w - 1] - 2 * lum[i - w] - lum[i - w + 1] + lum[i + w - 1] + 2 * lum[i + w] + lum[i + w + 1];
-      out[i] = Math.min(1, Math.sqrt(gx * gx + gy * gy) * 0.9);
+  // vertical pass
+  for (let x = 0; x < w; x++) {
+    let sr = 0, sg = 0, sb = 0;
+    for (let y = -radius; y <= radius; y++) {
+      const cy = Math.min(h - 1, Math.max(0, y));
+      const i = (cy * w + x) * 4;
+      sr += tmp[i]; sg += tmp[i + 1]; sb += tmp[i + 2];
+    }
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + x) * 4;
+      data[i] = sr / win; data[i + 1] = sg / win; data[i + 2] = sb / win;
+      const ya = Math.min(h - 1, y + radius + 1);
+      const yr = Math.max(0, y - radius);
+      const ia = (ya * w + x) * 4;
+      const ir = (yr * w + x) * 4;
+      sr += tmp[ia] - tmp[ir];
+      sg += tmp[ia + 1] - tmp[ir + 1];
+      sb += tmp[ia + 2] - tmp[ir + 2];
     }
   }
-  return out;
 }
 
-// Paint a photo (Image/Canvas) into a fresh canvas at w x h with a preset.
-// strength 0 = the plain photo, 1 = fully painted.
-export function paintPhoto(source, w, h, presetName, strength = 0.5) {
-  const preset = PRESETS[presetName] || PRESETS.sunset;
-  const s = strength == null ? preset.strength : strength;
-  const base = document.createElement('canvas');
-  base.width = w; base.height = h;
-  const bctx = base.getContext('2d');
-  bctx.drawImage(source, 0, 0, w, h);
+/** Quantize luminance to `levels` steps, preserving hue (scale RGB by lum ratio). */
+function posterize(data, levels) {
+  const step = 255 / (levels - 1);
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    if (lum < 1) continue;
+    const q = Math.round(lum / step) * step;
+    const s = q / lum;
+    data[i] = Math.min(255, r * s);
+    data[i + 1] = Math.min(255, g * s);
+    data[i + 2] = Math.min(255, b * s);
+  }
+}
 
-  // Flatten detail: two smoothing rounds at half and 0.7 scale.
-  let flat = smoothStep(base, w, h, 0.5);
-  flat = smoothStep(flat, w, h, 0.72);
+/** Map luminance through a gradient, blended with the original by `amount`. */
+function gradientMap(data, stops, amount) {
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    let a = stops[0], b2 = stops[stops.length - 1];
+    for (let s = 0; s < stops.length - 1; s++) {
+      if (lum >= stops[s][0] && lum <= stops[s + 1][0]) { a = stops[s]; b2 = stops[s + 1]; break; }
+    }
+    const span = (b2[0] - a[0]) || 1;
+    const t = Math.min(1, Math.max(0, (lum - a[0]) / span));
+    const gr = a[1] + (b2[1] - a[1]) * t;
+    const gg = a[2] + (b2[2] - a[2]) * t;
+    const gb = a[3] + (b2[3] - a[3]) * t;
+    data[i] = r + (gr - r) * amount;
+    data[i + 1] = g + (gg - g) * amount;
+    data[i + 2] = b + (gb - b) * amount;
+  }
+}
 
-  const fctx = flat.getContext('2d');
-  const img = fctx.getImageData(0, 0, w, h);
-  const d = img.data;
-
-  // Edge field at quarter size for speed.
-  const ew = Math.max(2, Math.round(w / 4));
-  const eh = Math.max(2, Math.round(h / 4));
-  const edgeSmall = document.createElement('canvas');
-  edgeSmall.width = ew; edgeSmall.height = eh;
-  edgeSmall.getContext('2d').drawImage(flat, 0, 0, ew, eh);
-  const edgeImg = edgeSmall.getContext('2d').getImageData(0, 0, ew, eh);
-  const edges = edgeField(edgeImg, ew, eh);
-
-  const levels = preset.levels;
-  const sat = preset.sat, bright = preset.bright, warm = preset.warm;
-  // Deterministic grain: a tiny hash per pixel, no Math.random in the loop.
+/** Sobel edge magnitude at FULL resolution. Never downsampled (FIX 1). */
+function sobelMagnitude(data, w, h) {
+  const mag = new Float32Array(w * h);
+  const lumAt = (x, y) => {
+    x = Math.min(w - 1, Math.max(0, x));
+    y = Math.min(h - 1, Math.max(0, y));
+    const i = (y * w + x) * 4;
+    return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  };
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
-      const lum = luminance(r0, g0, b0) / 255;
-      // Posterize the luminance into flat paint levels.
-      const q = Math.min(levels - 1, Math.floor(lum * levels)) / (levels - 1);
-      const [mr, mg, mb] = mapStops(preset.stops, q);
-      // Painted colour = gradient-mapped, blended toward the photo by (1 - s).
-      let r = mr * s + r0 * (1 - s);
-      let g = mg * s + g0 * (1 - s);
-      let b = mb * s + b0 * (1 - s);
-      // Saturation + brightness + a touch of warmth.
-      const l2 = luminance(r, g, b);
-      r = l2 + (r - l2) * sat;
-      g = l2 + (g - l2) * sat;
-      b = l2 + (b - l2) * sat;
-      r = r * bright + warm * 14;
-      g = g * bright;
-      b = b * bright - warm * 8;
-      // Ink outline: darken where the edge field is strong (sampled from quarter size).
-      const ex = Math.min(ew - 1, (x * ew / w) | 0);
-      const ey = Math.min(eh - 1, (y * eh / h) | 0);
-      const e = edges[ey * ew + ex];
-      if (e > 0.28) {
-        const ink = Math.min(1, (e - 0.28) * 2.2) * 0.55;
-        r *= 1 - ink; g *= 1 - ink; b *= 1 - ink;
-      }
-      // Grain, stronger in the shadows.
-      const hash = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-      const n = (hash - Math.floor(hash) - 0.5) * 16 * (1 - lum * 0.6);
-      r += n; g += n; b += n;
-      // Vignette: darken the corners gently.
-      const nx = (x / w - 0.5) * 2, ny = (y / h - 0.5) * 2;
-      const v = 1 - 0.22 * Math.max(0, nx * nx + ny * ny - 0.55);
-      d[i] = Math.max(0, Math.min(255, r * v));
-      d[i + 1] = Math.max(0, Math.min(255, g * v));
-      d[i + 2] = Math.max(0, Math.min(255, b * v));
+      const gx =
+        -lumAt(x - 1, y - 1) - 2 * lumAt(x - 1, y) - lumAt(x - 1, y + 1) +
+        lumAt(x + 1, y - 1) + 2 * lumAt(x + 1, y) + lumAt(x + 1, y + 1);
+      const gy =
+        -lumAt(x - 1, y - 1) - 2 * lumAt(x, y - 1) - lumAt(x + 1, y - 1) +
+        lumAt(x - 1, y + 1) + 2 * lumAt(x, y + 1) + lumAt(x + 1, y + 1);
+      mag[y * w + x] = Math.min(1, Math.sqrt(gx * gx + gy * gy) / 1020);
     }
   }
-  fctx.putImageData(img, 0, 0);
-  return flat;
+  return mag;
 }
 
-// Light unsharp mask: original + amount * (original - blurred).
-export function unsharp(canvas, amount, radiusPx) {
-  const w = canvas.width, h = canvas.height;
-  const blur = document.createElement('canvas');
-  blur.width = w; blur.height = h;
-  const bctx = blur.getContext('2d');
-  bctx.filter = `blur(${radiusPx}px)`;
-  bctx.drawImage(canvas, 0, 0);
-  const cctx = canvas.getContext('2d');
-  const a = cctx.getImageData(0, 0, w, h);
-  const b = bctx.getImageData(0, 0, w, h);
-  const da = a.data, db = b.data;
-  for (let i = 0; i < da.length; i += 4) {
-    da[i] = Math.max(0, Math.min(255, da[i] + (da[i] - db[i]) * amount));
-    da[i + 1] = Math.max(0, Math.min(255, da[i + 1] + (da[i + 1] - db[i + 1]) * amount));
-    da[i + 2] = Math.max(0, Math.min(255, da[i + 2] + (da[i + 2] - db[i + 2]) * amount));
+/** Soft elliptical face mask (0..1) in canvas fractions; 1 = inside the face zone. */
+function faceMaskAt(x, y, w, h, face) {
+  if (!face) return 0;
+  const dx = (x / w - face.x) / Math.max(0.02, face.rx);
+  const dy = (y / h - face.y) / Math.max(0.02, face.ry);
+  const d = dx * dx + dy * dy;
+  if (d >= 1.44) return 0; // outside the soft edge
+  if (d <= 0.64) return 1; // solid inside
+  return (1.44 - d) / 0.8; // soft falloff
+}
+
+/** Dark violet ink where edges are strong; weakened inside the face zone (FIX 1). */
+function inkPass(data, mag, w, h, threshold, strength, face) {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const m = mag[y * w + x];
+      if (m <= threshold) continue;
+      let s = strength * Math.min(1, (m - threshold) / (1 - threshold));
+      const fm = faceMaskAt(x, y, w, h, face);
+      s *= 1 - 0.72 * fm; // faces keep ~28% of the ink
+      if (s <= 0.01) continue;
+      const i = (y * w + x) * 4;
+      // dark violet ink, not pure black — keeps the sunset palette
+      data[i] = data[i] * (1 - s) + 18 * s;
+      data[i + 1] = data[i + 1] * (1 - s) + 8 * s;
+      data[i + 2] = data[i + 2] * (1 - s) + 34 * s;
+    }
   }
-  cctx.putImageData(a, 0, 0);
+}
+
+/** Fine deterministic grain, stronger in the shadows. */
+function grainPass(data, amount) {
+  for (let i = 0; i < data.length; i += 4) {
+    const px = i / 4;
+    // deterministic per-pixel hash so re-renders are identical
+    let hsh = (px * 2654435761) >>> 0;
+    hsh ^= hsh >> 13; hsh = (hsh * 1274126177) >>> 0; hsh ^= hsh >> 16;
+    const n = (hsh / 4294967295 - 0.5) * 2;
+    const lum = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+    const a = amount * (1.25 - lum); // shadows get more grain
+    data[i] = Math.min(255, Math.max(0, data[i] + n * 255 * a * 0.5));
+    data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + n * 255 * a * 0.5));
+    data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + n * 255 * a * 0.5));
+  }
+}
+
+/**
+ * Paint a photo into a canvas of exactly (w, h).
+ *
+ * img: an HTMLImageElement / canvas (already loaded).
+ * presetName: one of PRESETS.
+ * opts: {
+ *   crop: { x, y, zoom } — pan/zoom in photo fractions (0..1 centre, zoom >= 1),
+ *   gentle: boolean — hero treatment (FIX 2): more smoothing, more levels,
+ *           weaker ink, softer gradient map,
+ *   face: { x, y, rx, ry } — face zone in canvas fractions (ink weakened there),
+ *   brighten: number — extra brightness multiplier for the painted result
+ *           (used for the SCORE panel, +20%),
+ * }
+ */
+export function paintPhoto(img, w, h, presetName, opts = {}) {
+  const preset = PRESETS[presetName] || PRESETS.sunset;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  // Cover-fit draw with pan/zoom from the crop (photo fractions).
+  const crop = opts.crop || { x: 0.5, y: 0.5, zoom: 1 };
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const base = Math.max(w / iw, h / ih) * (crop.zoom || 1);
+  const dw = iw * base, dh = ih * base;
+  const dx = w / 2 - crop.x * dw;
+  const dy = h / 2 - crop.y * dh;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, dx, dy, dw, dh);
+
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  const levels = opts.gentle ? Math.max(preset.levels, 9) : preset.levels;
+  const smoothPasses = opts.gentle ? preset.smooth + 1 : preset.smooth;
+  const ink = opts.gentle ? preset.ink * 0.6 : preset.ink;
+  const mapAmount = opts.gentle ? Math.min(preset.mapStrength, 0.75) : preset.mapStrength;
+
+  for (let p = 0; p < smoothPasses; p++) boxBlur(data, w, h, 2);
+  posterize(data, levels);
+  gradientMap(data, preset.stops, mapAmount);
+
+  // FIX 1: Sobel at full resolution — never a downsampled edge field.
+  const mag = sobelMagnitude(data, w, h);
+  inkPass(data, mag, w, h, preset.inkThreshold, ink, opts.face || null);
+
+  grainPass(data, preset.grain);
+
+  if (opts.brighten && opts.brighten !== 1) {
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = Math.min(255, data[i] * opts.brighten);
+      data[i + 1] = Math.min(255, data[i + 1] * opts.brighten);
+      data[i + 2] = Math.min(255, data[i + 2] * opts.brighten);
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
   return canvas;
-}
-
-// Procedural Vice City sunset backdrop: sun disc, banded clouds, palm silhouettes, skyline.
-// Drawn once per cover when the Sunset Backdrop toggle is on (default off).
-export function drawSunsetBackdrop(ctx, w, h) {
-  const sky = ctx.createLinearGradient(0, 0, 0, h);
-  sky.addColorStop(0, '#2b1150');
-  sky.addColorStop(0.42, '#a83a7c');
-  sky.addColorStop(0.68, '#ff7a59');
-  sky.addColorStop(1, '#ffc46b');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, h);
-  // Sun disc with a soft halo.
-  const sx = w * 0.68, sy = h * 0.42, sr = Math.min(w, h) * 0.16;
-  const halo = ctx.createRadialGradient(sx, sy, sr * 0.2, sx, sy, sr * 2.4);
-  halo.addColorStop(0, 'rgba(255, 236, 170, 0.85)');
-  halo.addColorStop(1, 'rgba(255, 236, 170, 0)');
-  ctx.fillStyle = halo;
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = '#ffe9a8';
-  ctx.beginPath();
-  ctx.arc(sx, sy, sr, 0, Math.PI * 2);
-  ctx.fill();
-  // Banded clouds: a few soft horizontal bars.
-  ctx.fillStyle = 'rgba(255, 150, 120, 0.35)';
-  for (let i = 0; i < 5; i++) {
-    const cy = h * (0.16 + i * 0.09);
-    const cw = w * (0.5 + ((i * 37) % 30) / 100);
-    const cx = w * (((i * 53) % 40) / 100);
-    ctx.beginPath();
-    ctx.ellipse(cx + cw / 2, cy, cw / 2, h * 0.018, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // Art-deco skyline along the bottom.
-  ctx.fillStyle = '#241033';
-  let bx = 0;
-  let seed = 7;
-  while (bx < w) {
-    seed = (seed * 37 + 11) % 97;
-    const bw = w * (0.05 + (seed % 9) / 100);
-    const bh = h * (0.10 + (seed % 13) / 100);
-    ctx.fillRect(bx, h - bh, bw, bh);
-    // Neon roof line.
-    ctx.fillStyle = '#ff5fa2';
-    ctx.fillRect(bx, h - bh, bw, Math.max(2, h * 0.004));
-    ctx.fillStyle = '#241033';
-    bx += bw + w * 0.008;
-  }
-  // Two palm silhouettes.
-  drawPalm(ctx, w * 0.08, h * 0.98, h * 0.34, '#1c0b2e');
-  drawPalm(ctx, w * 0.94, h * 0.99, h * 0.28, '#1c0b2e');
-}
-
-function drawPalm(ctx, x, y, size, color) {
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = Math.max(3, size * 0.03);
-  ctx.lineCap = 'round';
-  // Trunk: a gentle curve.
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.quadraticCurveTo(x + size * 0.06, y - size * 0.55, x - size * 0.04, y - size);
-  ctx.stroke();
-  // Fronds: seven arcs fanning from the crown.
-  const cx = x - size * 0.04, cy = y - size;
-  for (let i = 0; i < 7; i++) {
-    const a = Math.PI * (0.08 + (i / 6) * 0.84);
-    const tx = cx + Math.cos(a) * size * 0.42;
-    const ty = cy + Math.sin(a) * size * 0.22 - size * 0.1;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.quadraticCurveTo(cx + Math.cos(a) * size * 0.22, cy - size * 0.16, tx, ty);
-    ctx.stroke();
-  }
-  // Coconuts.
-  ctx.beginPath();
-  ctx.arc(cx - size * 0.02, cy + size * 0.03, size * 0.035, 0, Math.PI * 2);
-  ctx.arc(cx + size * 0.03, cy + size * 0.04, size * 0.03, 0, Math.PI * 2);
-  ctx.fill();
 }
