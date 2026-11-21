@@ -97,6 +97,8 @@ body {
  * 900 px. One row of three compact buttons, size on top and dimensions
  * small underneath, frees the room Export needs. */
 .sizes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+/* Fix round 9: the panels side control has four buttons. */
+.sizes.four { grid-template-columns: repeat(4, 1fr); }
 .sizes button {
   text-align: center; background: #1c0a28; color: #f5e9ff; border: 1px solid #3a1a52;
   border-radius: 8px; padding: 6px 4px; cursor: pointer; font-size: 13px; font-weight: 700;

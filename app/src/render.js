@@ -40,7 +40,21 @@ const SP_SIZES = {
  * wordmark across his mouth in square and his eyes in portrait. The
  * footer rides with the title so the tagline never lands on it, and
  * is clamped to keep the footer band inside the canvas. */
-function spLayoutFor(sizeName, flip, titleDY) {
+/* Fix round 9: panel side control. `panelsSide` is 'auto' (default),
+ * 'left', 'right' or 'off'. Auto keeps the focus rule (flip left when
+ * the subject focus sits right of centre, so the subject is never
+ * covered). Explicit left/right force that side — for photos with
+ * faces on both sides, where the focus rule picks the wrong one — and
+ * off drops the panel stack entirely. Returns {flip, off}. */
+function spResolvePanels(state) {
+  const side = (state && state.panelsSide) || 'auto';
+  if (side === 'off') return { flip: false, off: true };
+  if (side === 'left') return { flip: true, off: false };
+  if (side === 'right') return { flip: false, off: false };
+  return { flip: !!(state.focus && state.focus.x > 0.5), off: false };
+}
+
+function spLayoutFor(sizeName, flip, titleDY, noPanels) {
   // (fix round 2, item 8: the portrait band was too tall — the tagline
   // sat ~200 px above the footer with dead air between them. The band
   // is shorter now and the footer rides up to meet it.)
@@ -91,7 +105,9 @@ function spLayoutFor(sizeName, flip, titleDY) {
     layout.title.y += dy;
     layout.footer.y = Math.min(1 - layout.footer.h, layout.footer.y + dy);
   }
-  if (flip) {
+  if (noPanels) {
+    layout.supports = [];
+  } else if (flip) {
     layout.supports = layout.supports.map((f) => ({ ...f, x: 1 - f.x - f.w }));
   }
   return layout;
@@ -272,12 +288,15 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   const style = SP_STYLES[state.style] || SP_STYLES.sunset;
   // Fix round 5, item 1: the panel stack flips to the LEFT when the
   // subject focus sits right of centre, so the subject is never
-  // covered, whatever photo is loaded.
-  const flipPanels = !!(state.focus && state.focus.x > 0.5);
+  // covered, whatever photo is loaded. Fix round 9: the side is
+  // resolved through spResolvePanels — 'auto' keeps that focus rule,
+  // explicit left/right/off come from the editor toggle or ?panels=.
+  const panels = spResolvePanels(state);
+  const flipPanels = panels.flip;
   // Fix round 8: per-size title height from state (0 if unset, e.g.
   // a saved state from before the control existed).
   const titleDY = (state.titleY && state.titleY[sizeName]) || 0;
-  const L = spLayoutFor(sizeName, flipPanels, titleDY);
+  const L = spLayoutFor(sizeName, flipPanels, titleDY, panels.off);
   const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
 
   const canvas = spCanvas(W, H);
@@ -381,10 +400,14 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
       || state.photos[panel.photo] === 'samples/palm-beach.jpg';
     // Fix round 8: THE SCORE (group-night) reads dark — +20% brightness
     // in every size. The wide 1.12 lift stays for the other panels.
-    const isScore = state.photos[panel.photo] === 'samples/group-night.jpg';
+    // Fix round 9: THE CREW (selfie-day) and THE GETAWAY (friends-day)
+    // read just as dark next to it — the same +20% lift for all three
+    // panel photos, so the stack reads as one brightness.
+    const SP_BRIGHT_PANELS = ['samples/group-night.jpg', 'samples/selfie-day.jpg', 'samples/friends-day.jpg'];
+    const needsLift = SP_BRIGHT_PANELS.includes(state.photos[panel.photo]);
     let bright = sizeName === 'wide' ? 1.12 : 1;
     let sat = sizeName === 'wide' ? 0.92 : 1;
-    if (isScore) bright = Math.max(bright, 1.2);
+    if (needsLift) bright = Math.max(bright, 1.2);
     if (isShore) sat = 1.25;
     const filt = (bright !== 1 || sat !== 1)
       ? 'brightness(' + bright.toFixed(2) + ') saturate(' + sat.toFixed(2) + ')' : 'none';
@@ -435,10 +458,14 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
   // Fix round 5, item 4: on 16:9 the wordmark is capped at 55% width and
   // sits a little higher (0.47) — at 62%/0.50 its extrusion reaches the
   // tagline slot and the tagline lands on the footer subtitle.
+  // Fix round 9: 52% instead (~5% smaller) and the wide title sits
+  // 1% lower by default (see titleY) — the real-photo hero's low chin
+  // still grazed the wordmark's top edge at 55%. Do NOT just lower it:
+  // the subtitle/tagline sit tight below and would collide.
   const titleCx = tR.x + tR.w / 2;
   const titleCy = tR.y + tR.h * (sizeName === 'wide' ? 0.47 : 0.50);
   const titleSize = spDrawTitle(ctx, state.title, titleCx, titleCy, tR.w, tR.h * 0.70, style,
-    sizeName === 'wide' ? 0.55 : 0.62);
+    sizeName === 'wide' ? 0.52 : 0.62);
 
   if (state.tagline) {
     // Bebas Neue, not script/serif (fix round 2, item 6): the tagline

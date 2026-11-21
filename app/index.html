@@ -31,6 +31,13 @@
       <p class="hint">Each style sets the grade and lettering.</p>
       <div class="styles" id="styleCards"></div>
       <label class="toggle"><input type="checkbox" id="backdropToggle"> Sunset backdrop — skyline behind the hero</label>
+      <p class="hint">Panels — which side the supporting panels sit on. Auto picks the side that does not cover the subject.</p>
+      <div class="sizes four" id="panelsTabs">
+        <button type="button" data-panels="auto" class="on">Auto</button>
+        <button type="button" data-panels="left">Left</button>
+        <button type="button" data-panels="right">Right</button>
+        <button type="button" data-panels="off">Off</button>
+      </div>
     </section>
 
     <section>
@@ -46,7 +53,7 @@
       </label>
       <label class="field">Title height
         <input id="titleYInput" type="range" min="-8" max="22" step="1" value="0">
-        <span class="hint" id="titleYNote">Title height: 0%</span>
+        <span class="hint" id="titleYNote">0%</span>
       </label>
       <div class="labels" id="labelInputs"></div>
     </section>

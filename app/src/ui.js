@@ -48,8 +48,15 @@ function spDefaultState() {
     // Fix round 8: per-size title height (fraction of canvas height,
     // + = down). Defaults clear the real-photo hero's low front face:
     // square +0.03 (his chin grazed the wordmark), portrait +0.16
-    // (his eyes sat behind it), wide 0 (already clear).
-    titleY: { square: 0.03, portrait: 0.16, wide: 0 },
+    // (his eyes sat behind it), wide +0.01 (fix round 9: with the
+    // ~5% smaller wide wordmark, 1% lower clears his chin without
+    // pushing the tagline into the footer).
+    titleY: { square: 0.03, portrait: 0.16, wide: 0.01 },
+    // Fix round 9: panel side — 'auto' (default, focus rule: the side
+    // that does not cover the subject), 'left', 'right' or 'off'.
+    // Explicit sides fix photos with faces on both sides, where the
+    // focus rule picks the wrong one (heist-duo square, group-night).
+    panelsSide: 'auto',
     // Sunset backdrop OFF by default (fix round 4, item 2): the hero is
     // one full photo; the procedural skyline is opt-in via the toggle.
     backdrop: false,
@@ -119,9 +126,11 @@ function spLayoutPx() {
   const W = dims.w * scale;
   const H = dims.h * scale;
   // Fix round 5, item 1: same flip rule as the renderer — the overlay
-  // rects must sit where the panels actually are.
-  const L = spLayoutFor(spState.size, !!(spState.focus && spState.focus.x > 0.5),
-    (spState.titleY && spState.titleY[spState.size]) || 0);
+  // rects must sit where the panels actually are. Fix round 9: resolved
+  // through spResolvePanels, so the toggle/?panels= is honoured here too.
+  const panels = spResolvePanels(spState);
+  const L = spLayoutFor(spState.size, panels.flip,
+    (spState.titleY && spState.titleY[spState.size]) || 0, panels.off);
   const R = (f) => ({ x: f.x * W, y: f.y * H, w: f.w * W, h: f.h * H });
   return { W, H, hero: R(L.hero), supports: L.supports.map(R), title: R(L.title), footer: R(L.footer) };
 }
@@ -290,7 +299,11 @@ function spSyncInputs() {
   const ty = spState.titleY || {};
   const cur = ty[spState.size] == null ? 0 : ty[spState.size];
   $('titleYInput').value = Math.round(cur * 100);
-  $('titleYNote').textContent = 'Title height: ' + (cur > 0 ? '+' : '') + Math.round(cur * 100) + '%';
+  // Fix round 9: the readout is just the value now — the field label
+  // above already says "Title height" (was duplicated: "Title height"
+  // label + "Title height: 0%" readout).
+  $('titleYNote').textContent = (cur > 0 ? '+' : '') + Math.round(cur * 100) + '%';
+  spSyncPanelsTabs();
   spBuildLabels();
   spBuildStrip();
   spBuildThumbs();
@@ -443,6 +456,12 @@ function spApplyShotParams() {
   if (shot === 'portrait') spState.size = 'portrait';
   if (shot === 'wide') spState.size = 'wide';
   if (shot === 'cover' || shot === 'editor') spState.size = spState.size || 'square';
+  // Fix round 9: ?panels=auto|left|right|off overrides the panel side
+  // for the current state (shot params use it to pin the side that
+  // keeps every face visible).
+  if (q.get('panels') && ['auto', 'left', 'right', 'off'].includes(q.get('panels'))) {
+    spState.panelsSide = q.get('panels');
+  }
   // Fix round 8: ?titley=+0.16 overrides the title height for the
   // current size (fraction of canvas height, + = down).
   if (q.get('titley') !== null) {
@@ -485,10 +504,28 @@ $('titleYInput').addEventListener('input', (e) => {
   if (!spState.titleY) spState.titleY = { square: 0, portrait: 0, wide: 0 };
   const cur = parseInt(e.target.value, 10) / 100;
   spState.titleY[spState.size] = cur;
-  $('titleYNote').textContent = 'Title height: ' + (cur > 0 ? '+' : '') + Math.round(cur * 100) + '%';
+  $('titleYNote').textContent = (cur > 0 ? '+' : '') + Math.round(cur * 100) + '%';
   spScheduleRender();
 });
 $('titleYInput').addEventListener('change', () => spPushUndo());
+/* Fix round 9: panels side control — Auto (focus rule), Left, Right,
+ * Off. The default (Auto) picks the side that does not cover the
+ * subject; explicit sides fix photos with faces on both sides. */
+function spSyncPanelsTabs() {
+  const cur = spState.panelsSide || 'auto';
+  document.querySelectorAll('#panelsTabs button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.panels === cur);
+  });
+}
+document.querySelectorAll('#panelsTabs button').forEach((b) => {
+  b.addEventListener('click', () => {
+    if (spState.panelsSide === b.dataset.panels) return;
+    spPushUndo();
+    spState.panelsSide = b.dataset.panels;
+    spSyncPanelsTabs();
+    spScheduleRender();
+  });
+});
 document.querySelectorAll('#sizeTabs button').forEach((b) => {
   b.addEventListener('click', () => {
     if (spState.size === b.dataset.size) return;
