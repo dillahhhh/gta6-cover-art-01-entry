@@ -45,6 +45,7 @@ PNG to share.
   ordinary daylight photos (a selfie and friends in a park) alongside
   the cinematic cast shots, and every panel crops to the faces, so an
   ordinary phone selfie visibly becomes key art.
+- Hero photo: Jace Ulloa / Unsplash (two men at a lakeside at golden hour).
 
 ## Try it
 

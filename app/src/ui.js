@@ -8,6 +8,7 @@
  */
 
 const SP_SAMPLES = [
+  'samples/hero-real.jpg',
   'samples/heist-duo.jpg',
   'samples/selfie-day.jpg',
   'samples/friends-day.jpg',
@@ -21,15 +22,18 @@ const SP_SAMPLES = [
 const SP_DEFAULT_LABELS = ['THE CREW', 'THE GETAWAY', 'THE SCORE'];
 
 function spDefaultState() {
-  // The supporting panels lead with ordinary phone photos (fix round,
-  // item 1): a daylight selfie and friends in a park, so the judge sees
-  // at once that any photo becomes key art — not GTA stock art.
-  const photos = ['samples/heist-duo.jpg', 'samples/selfie-day.jpg', 'samples/friends-day.jpg', 'samples/group-night.jpg'];
+  // The hero is a real photograph (fix round 7): two men at a lakeside
+  // at golden hour (Jace Ulloa / Unsplash) — both faces fully in frame,
+  // right of centre, so the panel stack flips left (focus.x > 0.5).
+  const photos = ['samples/hero-real.jpg', 'samples/selfie-day.jpg', 'samples/friends-day.jpg', 'samples/group-night.jpg'];
   return {
     photos,
     // Hero crop centres on the faces; panel crops use each photo's
     // face zone (fix round 2, item 5) so heads are never cut.
-    hero: { photo: 0, crop: { x: 0.5, y: 0.30, scale: 1.15, rot: 0 } },
+    // hero-real faces: younger man centre ~(0.53, 0.62), bearded man
+    // ~(0.73, 0.27) — crop x 0.55 + SP_HERO_FRAME dx per size centres
+    // the pair in the free right zone; focus.x > 0.5 flips panels left.
+    hero: { photo: 0, crop: { x: 0.55, y: 0.5, scale: 1.0, rot: 0 } },
     panels: [1, 2, 3].map((p, i) => ({
       photo: p,
       crop: { x: 0.5, y: spFaceY(photos[p]), scale: 1, rot: 0 },
@@ -40,7 +44,7 @@ function spDefaultState() {
     title: 'SUNSET HEIST',
     subtitle: 'VICE CITY · TONIGHT',
     tagline: 'One last job.',
-    focus: { x: 0.5, y: 0.28 },
+    focus: { x: 0.68, y: 0.45 },
     // Sunset backdrop OFF by default (fix round 4, item 2): the hero is
     // one full photo; the procedural skyline is opt-in via the toggle.
     backdrop: false,

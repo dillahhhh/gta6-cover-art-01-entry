@@ -309,6 +309,7 @@ function spPalm(ctx, x, y, s, lean, colour) {
  * not 0.22: the old value centred the panel window on the wall above
  * the face and cut the mouth off. */
 const SP_FACE_Y = {
+  'samples/hero-real.jpg': 0.45,
   'samples/selfie-day.jpg': 0.53,
   'samples/friends-day.jpg': 0.10,
   'samples/group-night.jpg': 0.22,

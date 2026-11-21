@@ -223,24 +223,22 @@ function spGrade(ctx, W, H, style) {
   }
 }
 
-/* Per-size hero framing (fix round 5, item 1). Narrowing the panels
- * alone does NOT free the subject: the sample couple spans photo x
- * 0.34–0.69, and a centred hero crop maps the man's face (right edge
- * photo 0.69) to canvas x ~0.89 (square) and ~0.99 (portrait) — under
- * any right-side stack. So each size reframes the hero crop on top of
- * the user's crop (a layout adaptation, like the title band differing
- * per size): square pans right and zooms out slightly so BOTH faces
- * sit fully left of the 0.73 panels with ~20–30 px margins (the first
- * pass, pan only, left the woman's face touching the left edge);
- * portrait zooms out to scale 1.0 — the widest window that still
- * covers the canvas — and pans so both faces sit left of the 0.80
- * panels with ~10 px margins; wide needs only a small nudge for
- * margin (the 16:9 photo maps nearly 1:1 there and the face already
- * clears 0.72). Verified against the cover math (spCoverDraw). */
+/* Per-size hero framing (fix round 5, item 1; retuned fix round 7
+ * for the real-photo hero). The hero-real faces sit right of centre
+ * (photo x 0.42–0.83) and the focus sits right too (focus.x 0.68),
+ * so the panel stack flips LEFT and the faces keep the whole right
+ * side. Each size pans the crop so both faces sit fully in frame
+ * with margins: square centres the pair at photo x ~0.55, portrait
+ * (narrowest window, 0.53 of the photo) at ~0.57 with ~10 px margins
+ * on both sides, wide shows the full photo width so dx is 0.
+ * Scale is 1 everywhere: the base crop is already 1.0, and any
+ * extra zoom would push the low front face under the title band.
+ * (The front face is low in this photo — its chin lands near the
+ * title band in every size; verified visually per size.) */
 const SP_HERO_FRAME = {
-  square: { dx: 0.233, scale: 1.10 / 1.15 },
-  portrait: { dx: 0.17, scale: 1 / 1.15 },
-  wide: { dx: 0.05, scale: 1 },
+  square: { dx: 0.09, scale: 1 },
+  portrait: { dx: 0.16, scale: 1 },
+  wide: { dx: 0, scale: 1 },
 };
 
 /* Render the full poster. state: {photos, hero, panels, style, title,
@@ -383,6 +381,7 @@ function spRenderPoster(state, sizeName, scale, imgMap) {
     // cover's photos differ from the square's, so slot labels mismatched
     // — a beach with no people was labelled "THE SCORE").
     const SP_PHOTO_LABELS = {
+      'samples/hero-real.jpg': 'THE HEIST',
       'samples/selfie-day.jpg': 'THE CREW',
       'samples/friends-day.jpg': 'THE GETAWAY',
       'samples/group-night.jpg': 'THE SCORE',
